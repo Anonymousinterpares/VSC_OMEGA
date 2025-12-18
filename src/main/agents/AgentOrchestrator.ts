@@ -112,8 +112,8 @@ export class AgentOrchestrator {
                     // codeRes contains the verbose LLM Output (File Dumps). We want to strip that.
                     let cleanFinal = codeRes;
                     
-                    // 1. Remove File Dumps
-                    cleanFinal = cleanFinal.replace(/### FILE:[\s\S]*?### END FILE/g, '[File Content Hidden]');
+                    // 1. Remove File Dumps entirely (User doesn't want to see "[File Content Hidden]" spam)
+                    cleanFinal = cleanFinal.replace(/### FILE:[\s\S]*?### END FILE\s*/g, '');
                     
                     return {
                         content: cleanFinal,

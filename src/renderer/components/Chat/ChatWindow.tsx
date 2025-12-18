@@ -44,6 +44,102 @@ const CollapsibleLog: React.FC<{
   );
 };
 
+// Parsed Message Renderer
+const FormattedMessage: React.FC<{ content: string }> = ({ content }) => {
+  // Regex to split by tags. Captures the full tag block.
+  // Supports: <thought>, <write_file>, <replace>, <read_file>
+  // Note: This simple regex assumes no nested tags of the same type.
+  const regex = /(<(thought|write_file|replace|read_file)(?: path="([^"]+)")?>([\s\S]*?)<\/\2>)/g;
+  
+  const parts = content.split(regex);
+  const elements: React.ReactNode[] = [];
+
+  for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      
+      // The split with capturing groups returns: 
+      // [text, full_tag, tag_name, path_attr, inner_content, text, ...]
+      // We need to detect if 'part' is one of the matched groups or plain text.
+      // Actually, split output structure is:
+      // 0: text before
+      // 1: full tag
+      // 2: tag name
+      // 3: path (undefined if none)
+      // 4: content
+      // 5: text after (becomes next iteration's text before)
+      // BUT, React's split logic or JS split might behave differently with multiple groups.
+      // Let's use a cleaner matchAll approach or just a simple parser.
+  }
+
+  // Simpler Parser Approach
+  let lastIndex = 0;
+  let match;
+  const parsedElements: React.ReactNode[] = [];
+  
+  // Reset regex
+  const tagRegex = /<(thought|write_file|replace|read_file)(?: path="([^"]+)")?>([\s\S]*?)<\/\1>/g;
+
+  while ((match = tagRegex.exec(content)) !== null) {
+      // Push preceding text
+      if (match.index > lastIndex) {
+          parsedElements.push(<span key={`text-${lastIndex}`} className="whitespace-pre-wrap">{content.substring(lastIndex, match.index)}</span>);
+      }
+
+      const tagName = match[1];
+      const path = match[2]; // Might be undefined
+      const innerContent = match[3];
+
+      if (tagName === 'thought') {
+          parsedElements.push(
+              <details key={`thought-${match.index}`} className="mb-2 bg-gray-900/50 rounded border border-gray-700">
+                  <summary className="cursor-pointer px-3 py-1 text-xs font-mono text-gray-500 hover:text-gray-300 select-none">
+                      Thinking Process
+                  </summary>
+                  <div className="p-3 text-gray-400 font-mono text-xs whitespace-pre-wrap border-t border-gray-700">
+                      {innerContent.trim()}
+                  </div>
+              </details>
+          );
+      } else if (tagName === 'write_file' || tagName === 'replace') {
+          parsedElements.push(
+              <div key={`file-${match.index}`} className="mb-2 border border-blue-900/50 rounded overflow-hidden">
+                  <div className="bg-blue-900/20 px-3 py-1 text-xs font-mono flex items-center justify-between text-blue-300">
+                      <span className="font-bold flex items-center">
+                          {tagName === 'write_file' ? '📝 Write File' : '🔧 Patch File'}: {path || 'Unknown'}
+                      </span>
+                  </div>
+                  <details>
+                      <summary className="px-3 py-1 bg-black/20 text-[10px] text-gray-500 cursor-pointer hover:text-gray-300">
+                          Show Content
+                      </summary>
+                      <div className="p-3 bg-black/40 text-gray-300 font-mono text-xs whitespace-pre-wrap overflow-x-auto">
+                          {innerContent.trim()}
+                      </div>
+                  </details>
+              </div>
+          );
+      } else if (tagName === 'read_file') {
+           // Hide read_file blocks mostly, or show small pill
+           parsedElements.push(
+               <div key={`read-${match.index}`} className="inline-block mr-1 mb-1">
+                   <span className="px-2 py-0.5 rounded bg-gray-800 border border-gray-700 text-[10px] font-mono text-gray-500">
+                       📖 Read: {innerContent.trim()}
+                   </span>
+               </div>
+           );
+      }
+
+      lastIndex = tagRegex.lastIndex;
+  }
+
+  // Push remaining text
+  if (lastIndex < content.length) {
+      parsedElements.push(<span key={`text-${lastIndex}`} className="whitespace-pre-wrap">{content.substring(lastIndex)}</span>);
+  }
+
+  return <>{parsedElements}</>;
+};
+
 // Message Renderer
 const MessageContent: React.FC<{ content: string, steps?: any[], onStepRetry: (step: any) => void }> = ({ content, steps, onStepRetry }) => {
   const [showSteps, setShowSteps] = useState(false);
@@ -52,7 +148,6 @@ const MessageContent: React.FC<{ content: string, steps?: any[], onStepRetry: (s
   const handleRetryClick = (step: any, index: number) => {
       setRetryingStepIndex(index);
       onStepRetry(step);
-      // Reset spinner after 2s (or handle via prop if we tracked state globally)
       setTimeout(() => setRetryingStepIndex(null), 2000); 
   };
 
@@ -84,7 +179,9 @@ const MessageContent: React.FC<{ content: string, steps?: any[], onStepRetry: (s
         </div>
       )}
 
-      <div className="whitespace-pre-wrap">{content}</div>
+      <div className="text-sm">
+          <FormattedMessage content={content} />
+      </div>
     </div>
   );
 };
