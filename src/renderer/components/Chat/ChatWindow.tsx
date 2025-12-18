@@ -93,6 +93,7 @@ export const ChatWindow: React.FC = () => {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<IAgentMessage[]>([]);
   const [isThinking, setIsThinking] = useState(false);
+  const [autoApply, setAutoApply] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const { settings } = useSettingsStore();
   const { fileTree } = useFileStore();
@@ -131,17 +132,16 @@ export const ChatWindow: React.FC = () => {
           const response = await window.electron.ipcRenderer.invoke(CHANNELS.TO_MAIN.SEND_MESSAGE, {
               agent: step.agent,
               message: step.input, // The original input for this step
-              context: { fileTree }
+              context: { fileTree, autoApply }
           });
 
-          // We append the result as a NEW message for clarity, 
-          // or we could update the existing step (too complex for now).
+          // We append the result as a NEW message for clarity
           const retryMsg: IAgentMessage = {
             id: Date.now().toString(),
             role: 'assistant',
             agentName: `${step.agent} (Retry)`,
             content: response.content,
-            steps: [], // No steps for a single agent run (unless it recurses? Router won't recurse if agent is specific)
+            steps: [], 
             timestamp: Date.now()
           };
           setMessages(prev => [...prev, retryMsg]);
@@ -189,7 +189,8 @@ export const ChatWindow: React.FC = () => {
                 agent: 'Router', // Default
                 message: userMsg.content,
                 context: {
-                    fileTree: fileTree // INJECT FILE TREE
+                    fileTree: fileTree,
+                    autoApply: autoApply
                 }
             });
             responseContent = response.content;
@@ -216,7 +217,6 @@ export const ChatWindow: React.FC = () => {
             timestamp: Date.now()
         };
         setMessages(prev => [...prev, errorMsg]);
-        // Also stop streaming on the bot msg if it failed
         setMessages(prev => prev.map(msg => msg.id === botId ? { ...msg, isStreaming: false } : msg));
     } finally {
         setIsThinking(false);
@@ -235,7 +235,18 @@ export const ChatWindow: React.FC = () => {
       {/* Header */}
       <div className="p-3 border-b border-gray-800 flex justify-between items-center bg-gray-900">
         <span className="font-semibold text-gray-200">Agent Chat</span>
-        <span className="text-xs text-gray-500">{settings.selectedModel}</span>
+        <div className="flex items-center space-x-4">
+            <label className="flex items-center space-x-2 cursor-pointer group">
+                <input 
+                    type="checkbox" 
+                    checked={autoApply} 
+                    onChange={(e) => setAutoApply(e.target.checked)}
+                    className="w-3 h-3 rounded border-gray-600 bg-gray-800 text-blue-600 focus:ring-blue-500 focus:ring-offset-gray-900"
+                />
+                <span className="text-[10px] text-gray-500 group-hover:text-gray-300 transition-colors">Auto-Apply</span>
+            </label>
+            <span className="text-xs text-gray-500">{settings.selectedModel}</span>
+        </div>
       </div>
 
       {/* Messages */}

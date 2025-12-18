@@ -31,13 +31,25 @@ export class FileSystemService {
   }
 
   async handleReadFile(filePath: string): Promise<string> {
-    // Ensure we don't read outside project root for safety, unless it's a known safe path
-    // For this prototype, we'll allow reading absolute paths provided by the renderer
-    return await fs.readFile(filePath, 'utf-8');
+    const resolvedPath = this.resolvePath(filePath);
+    return await fs.readFile(resolvedPath, 'utf-8');
   }
 
   async handleWriteFile(filePath: string, content: string): Promise<void> {
-    await fs.writeFile(filePath, content, 'utf-8');
+    const resolvedPath = this.resolvePath(filePath);
+    await fs.writeFile(resolvedPath, content, 'utf-8');
+  }
+
+  private resolvePath(filePath: string): string {
+    if (path.isAbsolute(filePath)) {
+      return filePath;
+    }
+    // If we have a project root, resolve against it
+    if (this.projectRoot) {
+      return path.join(this.projectRoot, filePath);
+    }
+    // Fallback to CWD (or maybe should throw error if no folder open?)
+    return path.resolve(filePath);
   }
 
   private async readDirectory(dirPath: string): Promise<IFileNode[]> {

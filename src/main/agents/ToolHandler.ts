@@ -1,5 +1,11 @@
 import { FileSystemService } from '../services/FileSystem';
 
+interface IToolResult {
+    llmOutput: string; // Full content (including file dumps) for the Agent context
+    userOutput: string; // Concise summary for the User UI
+    actions: { type: 'write' | 'read' | 'replace', path: string }[];
+}
+
 export class ToolHandler {
   private fileSystem: FileSystemService;
 
@@ -7,44 +13,100 @@ export class ToolHandler {
     this.fileSystem = fileSystem;
   }
 
-  async executeTools(response: string): Promise<string> {
-    let output = '';
-    
+  async executeTools(response: string, autoApply = true): Promise<IToolResult | null> {
+    const actions: { type: 'write' | 'read' | 'replace', path: string }[] = [];
+    let llmOutputAccumulator = "";
+    let userOutputAccumulator = "";
+    let toolsFound = false;
+
     // 1. Handle <write_file>
-    // Regex to capture path attribute and content between tags
-    // Note: This is a basic regex; production might need a robust XML parser
-    const writeRegex = /<write_file\s+path=["'](.*?)["']\s*>([\s\S]*?)<\/write_file>/g;
-    let match;
-    while ((match = writeRegex.exec(response)) !== null) {
-      const [_, filePath, content] = match;
+    const writeRegex = /<write_file path="([^"]+)">([\s\S]*?)<\/write_file>/g;
+    let writeMatch;
+    while ((writeMatch = writeRegex.exec(response)) !== null) {
+      toolsFound = true;
+      const path = writeMatch[1];
+      const content = writeMatch[2];
       try {
-        await this.fileSystem.handleWriteFile(filePath, content.trim());
-        output += `\n[System] Successfully wrote to ${filePath}\n`;
-      } catch (err: any) {
-        output += `\n[System] Error writing to ${filePath}: ${err.message}\n`;
+        if (autoApply) {
+            await this.fileSystem.handleWriteFile(path, content);
+            const msg = `[System] Successfully wrote to ${path}`;
+            llmOutputAccumulator += `\n${msg}`;
+            userOutputAccumulator += `\n${msg}`;
+        } else {
+            const msg = `[System] (Auto-Apply OFF) Would write to ${path}`;
+            llmOutputAccumulator += `\n${msg}`;
+            userOutputAccumulator += `\n${msg}`;
+        }
+        actions.push({ type: 'write', path });
+      } catch (e: any) {
+        const msg = `[System] Error writing to ${path}: ${e.message}`;
+        llmOutputAccumulator += `\n${msg}`;
+        userOutputAccumulator += `\n${msg}`;
       }
     }
 
-    // 2. Handle <read_file>
+    // 2. Handle <replace> (Diffs)
+    const replaceRegex = /<replace path="([^"]+)">\s*<old>([\s\S]*?)<\/old>\s*<new>([\s\S]*?)<\/new>\s*<\/replace>/g;
+    let replaceMatch;
+    while ((replaceMatch = replaceRegex.exec(response)) !== null) {
+      toolsFound = true;
+      const path = replaceMatch[1];
+      const oldString = replaceMatch[2];
+      const newString = replaceMatch[3];
+      
+      try {
+          const currentContent = await this.fileSystem.handleReadFile(path);
+          if (currentContent.includes(oldString)) {
+              if (autoApply) {
+                  const newContent = currentContent.replace(oldString, newString);
+                  await this.fileSystem.handleWriteFile(path, newContent);
+                  const msg = `[System] Successfully patched ${path}`;
+                  llmOutputAccumulator += `\n${msg}`;
+                  userOutputAccumulator += `\n${msg}`;
+              } else {
+                  const msg = `[System] (Auto-Apply OFF) Would patch ${path}`;
+                  llmOutputAccumulator += `\n${msg}`;
+                  userOutputAccumulator += `\n${msg}`;
+              }
+              actions.push({ type: 'replace', path });
+          } else {
+              const msg = `[System] Replace failed: 'old' string not found in ${path}`;
+              llmOutputAccumulator += `\n${msg}`;
+              userOutputAccumulator += `\n${msg}`;
+          }
+      } catch (e: any) {
+          const msg = `[System] Error replacing in ${path}: ${e.message}`;
+          llmOutputAccumulator += `\n${msg}`;
+          userOutputAccumulator += `\n${msg}`;
+      }
+    }
+
+    // 3. Handle <read_file>
     const readRegex = /<read_file>(.*?)<\/read_file>/g;
-    while ((match = readRegex.exec(response)) !== null) {
-      const filePath = match[1];
+    let readMatch;
+    while ((readMatch = readRegex.exec(response)) !== null) {
+      toolsFound = true;
+      const path = readMatch[1].trim();
       try {
-        const content = await this.fileSystem.handleReadFile(filePath);
-        output += `\n### FILE: ${filePath}\n${content}\n### END FILE\n`;
-      } catch (err: any) {
-        output += `\n[System] Error reading ${filePath}: ${err.message}\n`;
+        const content = await this.fileSystem.handleReadFile(path);
+        // LLM gets the content
+        llmOutputAccumulator += `\n### FILE: ${path}\n${content}\n### END FILE\n`;
+        // User gets a summary (NO CONTENT DUMP)
+        userOutputAccumulator += `\n[System] Read file: ${path}`;
+        actions.push({ type: 'read', path });
+      } catch (e: any) {
+        const msg = `[System] Error reading ${path}: ${e.message}`;
+        llmOutputAccumulator += `\n${msg}`;
+        userOutputAccumulator += `\n${msg}`;
       }
     }
-    
-    // 3. Handle <search> (Stub for now)
-    const searchRegex = /<search\s+query=["'](.*?)["']\s+type=["'](.*?)["']\s*\/>/g;
-    while ((match = searchRegex.exec(response)) !== null) {
-        const [_, query] = match;
-        // TODO: Implement actual SearchService
-        output += `\n[System] Search functionality not yet implemented (Query: ${query})\n`;
-    }
 
-    return output;
+    if (!toolsFound) return null;
+
+    return {
+        llmOutput: llmOutputAccumulator.trim(),
+        userOutput: userOutputAccumulator.trim(),
+        actions
+    };
   }
 }
