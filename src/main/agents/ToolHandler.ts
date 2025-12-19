@@ -159,11 +159,27 @@ export class ToolHandler {
     while ((searchMatch = searchRegex.exec(response)) !== null) {
         toolsFound = true;
         const query = searchMatch[1];
-        const type = (searchMatch[2] as 'file' | 'content' | 'symbol') || 'content';
+        // The 'type' attribute from XML <search> was 'file'|'content'|'symbol'.
+        // Our new Search system uses ISearchOptions.
+        // We'll map the XML request to a content search for now.
+        const searchOptions = {
+            query: query,
+            matchCase: false,
+            matchWholeWord: false,
+            useRegex: false,
+            includes: '',
+            excludes: ''
+        };
         
         try {
-            const results = await this.fileSystem.handleSearch(query, type);
-            llmOutputAccumulator += `\n### SEARCH RESULTS (${type}: "${query}")\n${results}\n### END SEARCH\n`;
+            const results = await this.fileSystem.handleSearch(searchOptions);
+            // Format results for LLM
+            const formattedResults = results.map(r => 
+                `FILE: ${r.filePath}\n` + 
+                r.matches.map(m => `  ${m.lineNumber}: ${m.lineText}`).join('\n')
+            ).join('\n\n');
+            
+            llmOutputAccumulator += `\n### SEARCH RESULTS ("${query}")\n${formattedResults}\n### END SEARCH\n`;
             userOutputAccumulator += `\n[System] Searched for "${query}"`;
             // We treat search as a 'read' type action effectively
             actions.push({ type: 'read', path: 'SEARCH:' + query });

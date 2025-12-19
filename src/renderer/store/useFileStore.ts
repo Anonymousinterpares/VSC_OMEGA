@@ -6,16 +6,19 @@ interface FileState {
   rootPath: string | null;
   fileTree: IFileNode[];
   selectedFile: string | null;
+  unsavedFiles: Map<string, string>; // path -> content
   
   openFolder: () => void;
   selectFile: (path: string) => void;
   setFileTree: (rootPath: string, tree: IFileNode[]) => void;
+  setUnsavedFile: (path: string, content: string | null) => void;
 }
 
 export const useFileStore = create<FileState>((set) => ({
   rootPath: null,
   fileTree: [],
   selectedFile: null,
+  unsavedFiles: new Map(),
 
   openFolder: () => {
     if (window.electron) {
@@ -29,6 +32,18 @@ export const useFileStore = create<FileState>((set) => ({
 
   setFileTree: (rootPath, tree) => {
     set({ rootPath, fileTree: tree });
+  },
+
+  setUnsavedFile: (path: string, content: string | null) => {
+      set((state) => {
+          const newUnsaved = new Map(state.unsavedFiles);
+          if (content === null) {
+              newUnsaved.delete(path);
+          } else {
+              newUnsaved.set(path, content);
+          }
+          return { unsavedFiles: newUnsaved };
+      });
   }
 }));
 

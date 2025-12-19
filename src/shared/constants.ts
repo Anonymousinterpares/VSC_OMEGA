@@ -5,6 +5,10 @@ export const CHANNELS = {
     WRITE_FILE: 'write-file',
     SEARCH_IN_FILES: 'search-in-files',
     REPLACE_IN_FILES: 'replace-in-files',
+    BACKUP_FILE: 'backup-file',
+    GET_BACKUPS: 'get-backups',
+    RESTORE_BACKUP: 'restore-backup',
+    CHECK_DIRTY: 'check-dirty',
     SEND_MESSAGE: 'send-message',
     REVIEW_DECISION: 'review-decision',
     GET_SETTINGS: 'get-settings',
@@ -21,6 +25,7 @@ export const CHANNELS = {
         FILE_UPDATED: 'file:updated',
         REFRESH_TREE: 'file:refresh-tree',
         PROPOSE_CHANGE: 'proposal:change',
-        REQUEST_TASK_CONFIRMATION: 'proposal:task-confirmation'
+        REQUEST_TASK_CONFIRMATION: 'proposal:task-confirmation',
+        DIRTY_CHECK_REQUEST: 'app:dirty-check-request'
     }
 };

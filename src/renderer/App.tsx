@@ -12,23 +12,33 @@ import { CHANNELS } from '@/shared/constants';
 
 function App() {
   const { toggleModal } = useSettingsStore();
-  const { selectedFile } = useFileStore();
+  const { selectedFile, unsavedFiles, setUnsavedFile } = useFileStore(); // Updated Store
   const { addContextItem } = useContextStore();
   const { highlightTarget, setHighlightTarget } = useSearchStore();
   
   const [fileContent, setFileContent] = useState("// Welcome to The Hive");
-  const [isDirty, setIsDirty] = useState(false);
+  // const [isDirty, setIsDirty] = useState(false); // Removed local dirty state, use store
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<any>(null);
   const decorationsCollection = useRef<any>(null);
+  
+  // Debounce backup
+  const backupTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Load File (Disk OR Unsaved Memory)
   useEffect(() => {
     const loadFile = async () => {
       if (selectedFile && window.electron) {
+        // Check if we have an unsaved version in memory
+        if (unsavedFiles.has(selectedFile)) {
+            setFileContent(unsavedFiles.get(selectedFile)!);
+            return;
+        }
+
         try {
             const content = await window.electron.ipcRenderer.invoke(CHANNELS.TO_MAIN.READ_FILE, selectedFile);
             setFileContent(content);
-            setIsDirty(false); // Reset dirty state on file load
+            // setIsDirty(false); 
         } catch (error) {
             console.error("Failed to read file:", error);
             setFileContent("// Error reading file");
@@ -36,7 +46,7 @@ function App() {
       }
     };
     loadFile();
-  }, [selectedFile]);
+  }, [selectedFile]); // Do NOT depend on unsavedFiles here to avoid loops
 
   // Handle Search Highlight
   useEffect(() => {
@@ -84,7 +94,7 @@ function App() {
               ]);
           }, 50);
       }
-  }, [highlightTarget, fileContent, selectedFile]); // Added selectedFile dependency
+  }, [highlightTarget, fileContent, selectedFile]); 
 
   // Live File Update Listener
   useEffect(() => {
@@ -92,7 +102,9 @@ function App() {
           const removeListener = window.electron.ipcRenderer.on(CHANNELS.TO_RENDERER.FILE_UPDATED, (data: { path: string, content: string }) => {
               if (selectedFile && data.path === selectedFile) {
                   setFileContent(data.content);
-                  setIsDirty(false); // updates from backend (e.g. LLM or Save) are 'clean'
+                  setUnsavedFile(data.path, null); // Clear dirty state
+                  // Also clear backup
+                   window.electron.ipcRenderer.send(CHANNELS.TO_MAIN.BACKUP_FILE, { filePath: data.path, content: null });
               }
           });
           return () => removeListener();
@@ -128,8 +140,23 @@ function App() {
   };
 
   const handleFileChange = (value: string | undefined) => {
-      setFileContent(value || '');
-      setIsDirty(true);
+      const newContent = value || '';
+      setFileContent(newContent);
+      
+      if (selectedFile) {
+          setUnsavedFile(selectedFile, newContent);
+          
+          // Debounce Backup
+          if (backupTimeoutRef.current) clearTimeout(backupTimeoutRef.current);
+          backupTimeoutRef.current = setTimeout(() => {
+              if (window.electron) {
+                  window.electron.ipcRenderer.send(CHANNELS.TO_MAIN.BACKUP_FILE, { 
+                      filePath: selectedFile, 
+                      content: newContent 
+                  });
+              }
+          }, 1000); // 1s debounce
+      }
   };
 
   // Simple Save on Ctrl+S
@@ -137,13 +164,15 @@ function App() {
       const handleSave = async (e: KeyboardEvent) => {
           if ((e.ctrlKey || e.metaKey) && e.key === 's') {
               e.preventDefault();
-              if (selectedFile && window.electron && isDirty) {
+              if (selectedFile && window.electron && unsavedFiles.has(selectedFile)) {
                  try {
                      await window.electron.ipcRenderer.invoke(CHANNELS.TO_MAIN.WRITE_FILE, {
                          filePath: selectedFile,
                          content: fileContent
                      });
-                     // setIsDirty(false); // Handled by FILE_UPDATED event usually, but we can set it here too to be snappy
+                     setUnsavedFile(selectedFile, null); // Mark clean
+                     // Clear Backup
+                     window.electron.ipcRenderer.send(CHANNELS.TO_MAIN.BACKUP_FILE, { filePath: selectedFile, content: null });
                  } catch (err) {
                      console.error("Failed to save:", err);
                  }
@@ -152,7 +181,57 @@ function App() {
       };
       window.addEventListener('keydown', handleSave);
       return () => window.removeEventListener('keydown', handleSave);
-  }, [selectedFile, fileContent, isDirty]);
+  }, [selectedFile, fileContent, unsavedFiles]);
+
+  const isDirty = selectedFile ? unsavedFiles.has(selectedFile) : false;
+
+  // Handle App Close Request (Dirty Check)
+  useEffect(() => {
+      if (window.electron) {
+          const removeListener = window.electron.ipcRenderer.on(CHANNELS.TO_RENDERER.DIRTY_CHECK_REQUEST, () => {
+              const unsavedCount = unsavedFiles.size;
+              window.electron.ipcRenderer.send(CHANNELS.TO_MAIN.CHECK_DIRTY, { 
+                  isDirty: unsavedCount > 0, 
+                  unsavedCount 
+              });
+          });
+          return () => removeListener();
+      }
+  }, [unsavedFiles]);
+
+  // Check for Backups on Startup
+  useEffect(() => {
+      if (window.electron) {
+          window.electron.ipcRenderer.invoke(CHANNELS.TO_MAIN.GET_BACKUPS).then((backups: string[]) => {
+              if (backups.length > 0) {
+                  // Simply inform user or restore. 
+                  // For a "popup", we can use a simple confirm or a custom modal.
+                  // Using native confirm for simplicity in this iteration as requested "popup"
+                  const message = `Recovered ${backups.length} unsaved files from a previous session:\n\n${backups.map(p => p.split(/[/\\]/).pop()).join('\n')}\n\nDo you want to restore them to your workspace? (Cancel will delete backups)`;
+                  if (confirm(message)) {
+                       // Restore logic: Load backups into unsavedFiles store
+                       backups.forEach(async (path) => {
+                           // We need to read the backup content. 
+                           // We can use a new channel RESTORE_BACKUP to get content without overwriting disk file
+                           try {
+                               const content = await window.electron.ipcRenderer.invoke(CHANNELS.TO_MAIN.RESTORE_BACKUP, path);
+                               if (content !== null) {
+                                   setUnsavedFile(path, content);
+                               }
+                           } catch (e) {
+                               console.error(`Failed to restore backup for ${path}`, e);
+                           }
+                       });
+                  } else {
+                      // Clear backups
+                      backups.forEach(path => {
+                           window.electron.ipcRenderer.send(CHANNELS.TO_MAIN.BACKUP_FILE, { filePath: path, content: null });
+                      });
+                  }
+              }
+          });
+      }
+  }, []);
 
   return (
     <div className="flex h-screen w-screen bg-gray-950 text-gray-300 overflow-hidden font-sans relative">

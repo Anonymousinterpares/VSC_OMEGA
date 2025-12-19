@@ -1,6 +1,7 @@
 import { dialog, BrowserWindow } from 'electron';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import * as fsExtra from 'fs-extra';
 import { IFileNode, ISearchResult, ISearchMatch, ISearchOptions } from '../../shared/types';
 import { CHANNELS } from '../../shared/constants';
 
@@ -290,7 +291,7 @@ export class FileSystemService {
                 try {
                     const content = await fs.readFile(fullPath, 'utf-8');
                     let matchCount = 0;
-                    const newContent = content.replace(searchRegex, (match) => {
+                    const newContent = content.replace(searchRegex, (_) => {
                         matchCount++;
                         return replaceText;
                     });
@@ -318,5 +319,89 @@ export class FileSystemService {
       
       const regex = new RegExp(`^${regexStr}$`);
       return regex.test(filePath) || filePath.endsWith(pattern.replace(/^\*\*/, '')); 
+  }
+
+  // --- Backup / Crash Recovery ---
+
+  private getBackupPath(filePath: string): string {
+      if (!this.projectRoot) return '';
+      const relativePath = path.relative(this.projectRoot, filePath);
+      // Create a safe filename hash or just encode the path
+      const safeName = Buffer.from(relativePath).toString('base64').replace(/\//g, '_');
+      const backupDir = path.join(this.projectRoot, '.hive', 'backups');
+      if (!fsExtra.existsSync(backupDir)) {
+          fsExtra.mkdirpSync(backupDir);
+      }
+      return path.join(backupDir, safeName);
+  }
+
+  async handleBackupFile(filePath: string, content: string | null): Promise<void> {
+      if (!this.projectRoot) return;
+      
+      const backupPath = this.getBackupPath(filePath);
+      if (!backupPath) return;
+
+      if (content === null) {
+          // Remove backup
+          if (await fsExtra.pathExists(backupPath)) {
+              await fsExtra.remove(backupPath);
+          }
+      } else {
+          // Write backup
+          await fsExtra.writeFile(backupPath, content, 'utf-8');
+      }
+  }
+
+  async getBackups(): Promise<string[]> {
+      if (!this.projectRoot) return [];
+      const backupDir = path.join(this.projectRoot, '.hive', 'backups');
+      if (!await fsExtra.pathExists(backupDir)) return [];
+
+      const files = await fsExtra.readdir(backupDir);
+      const restoredPaths: string[] = [];
+
+      for (const file of files) {
+          try {
+              // Decode filename to get original relative path
+              const originalRelative = Buffer.from(file.replace(/_/g, '/'), 'base64').toString('utf-8');
+              const fullPath = path.join(this.projectRoot, originalRelative);
+              restoredPaths.push(fullPath);
+          } catch (e) {
+              console.error("Failed to decode backup filename:", file);
+          }
+      }
+      return restoredPaths;
+  }
+
+  async handleRestoreBackup(filePath: string): Promise<string | null> {
+      if (!this.projectRoot) return null;
+      const backupPath = this.getBackupPath(filePath);
+      if (await fsExtra.pathExists(backupPath)) {
+          return await fsExtra.readFile(backupPath, 'utf-8');
+      }
+      return null;
+  }
+
+  async commitBackupsToFiles(): Promise<void> {
+      if (!this.projectRoot) return;
+      const backupDir = path.join(this.projectRoot, '.hive', 'backups');
+      if (!await fsExtra.pathExists(backupDir)) return;
+
+      const files = await fsExtra.readdir(backupDir);
+      for (const file of files) {
+          try {
+              const originalRelative = Buffer.from(file.replace(/_/g, '/'), 'base64').toString('utf-8');
+              const fullPath = path.join(this.projectRoot, originalRelative);
+              const backupPath = path.join(backupDir, file);
+              
+              const content = await fsExtra.readFile(backupPath, 'utf-8');
+              await fsExtra.writeFile(fullPath, content, 'utf-8');
+              
+              // Clean up backup after commit
+              await fsExtra.remove(backupPath);
+          } catch (e) {
+              console.error("Failed to commit backup:", file, e);
+          }
+      }
   }
 }
