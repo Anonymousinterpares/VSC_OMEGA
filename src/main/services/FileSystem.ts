@@ -37,7 +37,53 @@ export class FileSystemService {
 
   async handleWriteFile(filePath: string, content: string): Promise<void> {
     const resolvedPath = this.resolvePath(filePath);
+    
+    // Create Shadow Backup
+    await this.createBackup(resolvedPath);
+
+    // Ensure directory exists
+    await fs.mkdir(path.dirname(resolvedPath), { recursive: true });
+
     await fs.writeFile(resolvedPath, content, 'utf-8');
+
+    // Notify Frontend
+    this.mainWindow.webContents.send(CHANNELS.TO_RENDERER.FILE_UPDATED, {
+        path: resolvedPath,
+        content: content
+    });
+    
+    // Refresh Tree (in case new file created)
+    if (this.projectRoot) {
+        const tree = await this.readDirectory(this.projectRoot);
+        this.mainWindow.webContents.send(CHANNELS.TO_RENDERER.REFRESH_TREE, { tree });
+    }
+  }
+
+  private async createBackup(resolvedPath: string): Promise<void> {
+      try {
+          // Check if file exists
+          await fs.access(resolvedPath);
+      } catch {
+          // File doesn't exist, no backup needed
+          return;
+      }
+
+      if (!this.projectRoot) return;
+
+      const historyDir = path.join(this.projectRoot, '.hive', 'history');
+      try {
+          await fs.mkdir(historyDir, { recursive: true });
+          
+          const filename = path.basename(resolvedPath);
+          const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+          const backupPath = path.join(historyDir, `${filename}.${timestamp}.bak`);
+          
+          await fs.copyFile(resolvedPath, backupPath);
+          // console.log(`Backup created at ${backupPath}`);
+      } catch (err) {
+          console.error("Failed to create backup:", err);
+          // We don't block the write if backup fails, but we log it.
+      }
   }
 
   private resolvePath(filePath: string): string {
@@ -106,5 +152,58 @@ export class FileSystemService {
         if (a.type === b.type) return a.name.localeCompare(b.name);
         return a.type === 'folder' ? -1 : 1;
     });
+  }
+
+  async handleSearch(query: string, type: 'file' | 'content' | 'symbol' = 'content'): Promise<string> {
+    if (!this.projectRoot) {
+        return "Error: No project folder is open.";
+    }
+
+    const results: string[] = [];
+    const searchInternal = async (dir: string) => {
+        try {
+            const entries = await fs.readdir(dir, { withFileTypes: true });
+            for (const entry of entries) {
+                const fullPath = path.join(dir, entry.name);
+                
+                // Skip common ignored folders
+                if (['node_modules', '.git', 'dist', 'out', 'build', '.hive'].includes(entry.name)) continue;
+
+                if (entry.isDirectory()) {
+                    await searchInternal(fullPath);
+                } else {
+                    if (type === 'file') {
+                        if (entry.name.toLowerCase().includes(query.toLowerCase())) {
+                            results.push(`FILE: ${fullPath}`);
+                        }
+                    } else {
+                        // Content or Symbol search
+                        try {
+                            const content = await fs.readFile(fullPath, 'utf-8');
+                            // Simple case-insensitive search
+                            const lines = content.split('\n');
+                            lines.forEach((line, index) => {
+                                if (line.toLowerCase().includes(query.toLowerCase())) {
+                                    // Limit line length for display
+                                    const trimmedLine = line.trim().substring(0, 100); 
+                                    results.push(`${fullPath} (Line ${index + 1}): ${trimmedLine}`);
+                                }
+                            });
+                        } catch (err) {
+                            // Ignore binary read errors etc
+                        }
+                    }
+                }
+            }
+        } catch (err) {
+            console.error(`Error searching ${dir}:`, err);
+        }
+    };
+
+    await searchInternal(this.projectRoot);
+    
+    if (results.length === 0) return "No matches found.";
+    // Limit to top 50 results to save context
+    return results.slice(0, 50).join('\n');
   }
 }

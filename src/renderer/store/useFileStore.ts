@@ -37,4 +37,12 @@ if (window.electron) {
     window.electron.ipcRenderer.on(CHANNELS.TO_RENDERER.FOLDER_OPENED, (data: { rootPath: string, tree: IFileNode[] }) => {
         useFileStore.getState().setFileTree(data.rootPath, data.tree);
     });
+
+    window.electron.ipcRenderer.on(CHANNELS.TO_RENDERER.REFRESH_TREE, (data: { tree: IFileNode[] }) => {
+        // Keep existing root path, just update tree
+        const currentRoot = useFileStore.getState().rootPath;
+        if (currentRoot) {
+            useFileStore.getState().setFileTree(currentRoot, data.tree);
+        }
+    });
 }

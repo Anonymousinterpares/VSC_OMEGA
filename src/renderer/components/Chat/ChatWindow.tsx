@@ -1,9 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, ChevronDown, ChevronRight, Activity, Layers, RefreshCw } from 'lucide-react';
-import { IAgentMessage } from '@/shared/types';
+import { Send, ChevronDown, ChevronRight, Activity, Layers, RefreshCw, Square } from 'lucide-react';
 import { CHANNELS } from '@/shared/constants';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { useFileStore } from '../../store/useFileStore';
+import { useContextStore } from '../../store/useContextStore';
+import { IAgentMessage } from '@/shared/types';
+import { TaskVerification } from './TaskVerification';
 
 // Helper component for collapsible sections with Retry
 const CollapsibleLog: React.FC<{ 
@@ -191,9 +193,11 @@ export const ChatWindow: React.FC = () => {
   const [messages, setMessages] = useState<IAgentMessage[]>([]);
   const [isThinking, setIsThinking] = useState(false);
   const [autoApply, setAutoApply] = useState(true);
+  const [autoMarkTasks, setAutoMarkTasks] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const { settings } = useSettingsStore();
   const { fileTree } = useFileStore();
+  const { activeContext } = useContextStore();
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -204,7 +208,7 @@ export const ChatWindow: React.FC = () => {
   // Streaming Listener
   useEffect(() => {
       if (window.electron) {
-          const removeListener = window.electron.ipcRenderer.on(CHANNELS.TO_RENDERER.AGENT_STEP_UPDATE, (data: { steps: any[] }) => {
+          const removeStepListener = window.electron.ipcRenderer.on(CHANNELS.TO_RENDERER.AGENT_STEP_UPDATE, (data: { steps: any[] }) => {
               setMessages(prev => {
                   const lastMsg = prev[prev.length - 1];
                   if (lastMsg && lastMsg.role === 'assistant' && lastMsg.isStreaming) {
@@ -216,7 +220,24 @@ export const ChatWindow: React.FC = () => {
                   return prev;
               });
           });
-          return () => removeListener();
+
+          const removeContentListener = window.electron.ipcRenderer.on(CHANNELS.TO_RENDERER.AGENT_CONTENT_UPDATE, (data: { content: string }) => {
+            setMessages(prev => {
+                const lastMsg = prev[prev.length - 1];
+                if (lastMsg && lastMsg.role === 'assistant' && lastMsg.isStreaming) {
+                    return [
+                        ...prev.slice(0, -1),
+                        { ...lastMsg, content: data.content }
+                    ];
+                }
+                return prev;
+            });
+        });
+
+          return () => {
+              removeStepListener();
+              removeContentListener();
+          };
       }
   }, []);
 
@@ -229,7 +250,7 @@ export const ChatWindow: React.FC = () => {
           const response = await window.electron.ipcRenderer.invoke(CHANNELS.TO_MAIN.SEND_MESSAGE, {
               agent: step.agent,
               message: step.input, // The original input for this step
-              context: { fileTree, autoApply }
+              context: { fileTree, activeContext, autoApply, autoMarkTasks }
           });
 
           // We append the result as a NEW message for clarity
@@ -248,6 +269,13 @@ export const ChatWindow: React.FC = () => {
       } finally {
           setIsThinking(false);
       }
+  };
+
+  const handleStop = async () => {
+    if (window.electron) {
+        await window.electron.ipcRenderer.invoke(CHANNELS.TO_MAIN.ABORT_WORKFLOW);
+        setIsThinking(false);
+    }
   };
 
   const handleSend = async () => {
@@ -287,7 +315,9 @@ export const ChatWindow: React.FC = () => {
                 message: userMsg.content,
                 context: {
                     fileTree: fileTree,
-                    autoApply: autoApply
+                    activeContext: activeContext,
+                    autoApply: autoApply,
+                    autoMarkTasks: autoMarkTasks
                 }
             });
             responseContent = response.content;
@@ -333,7 +363,16 @@ export const ChatWindow: React.FC = () => {
       <div className="p-3 border-b border-gray-800 flex justify-between items-center bg-gray-900">
         <span className="font-semibold text-gray-200">Agent Chat</span>
         <div className="flex items-center space-x-4">
-            <label className="flex items-center space-x-2 cursor-pointer group">
+            <label className="flex items-center space-x-2 cursor-pointer group" title="When disabled, you will be asked to confirm task completion">
+                <input 
+                    type="checkbox" 
+                    checked={autoMarkTasks} 
+                    onChange={(e) => setAutoMarkTasks(e.target.checked)}
+                    className="w-3 h-3 rounded border-gray-600 bg-gray-800 text-green-500 focus:ring-green-500 focus:ring-offset-gray-900"
+                />
+                <span className="text-[10px] text-gray-500 group-hover:text-gray-300 transition-colors">Auto-Mark</span>
+            </label>
+            <label className="flex items-center space-x-2 cursor-pointer group" title="When disabled, you will review code changes before applying">
                 <input 
                     type="checkbox" 
                     checked={autoApply} 
@@ -369,12 +408,15 @@ export const ChatWindow: React.FC = () => {
           </div>
         ))}
         {isThinking && (
-            <div className="flex justify-start">
+            <div className="flex justify-start items-center space-x-2">
                 <div className="bg-gray-800 text-gray-400 text-xs px-3 py-2 rounded-lg animate-pulse">
                     Thinking...
                 </div>
             </div>
         )}
+        
+        {/* Verification Modal Inject */}
+        <TaskVerification />
       </div>
 
       {/* Input */}
@@ -388,13 +430,23 @@ export const ChatWindow: React.FC = () => {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
           />
-          <button 
-            onClick={handleSend}
-            disabled={!input.trim() || isThinking}
-            className="absolute bottom-2 right-2 p-1.5 bg-blue-600 rounded-md text-white hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Send size={16} />
-          </button>
+          {isThinking ? (
+            <button 
+              onClick={handleStop}
+              className="absolute bottom-2 right-2 p-1.5 bg-red-600 rounded-md text-white hover:bg-red-500 transition-colors"
+              title="Stop Generation"
+            >
+              <Square size={16} fill="currentColor" />
+            </button>
+          ) : (
+            <button 
+              onClick={handleSend}
+              disabled={!input.trim()}
+              className="absolute bottom-2 right-2 p-1.5 bg-blue-600 rounded-md text-white hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Send size={16} />
+            </button>
+          )}
         </div>
       </div>
     </div>

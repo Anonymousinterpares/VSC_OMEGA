@@ -19,7 +19,11 @@ new string to replace it with
 1. Analyze the 'Plan' and 'Original Request'.
 2. If you need to check existing code, use <read_file>.
 3. For NEW files, use <write_file>.
-4. For EXISTING files, use <replace>. Provide enough context in <old> to be unique.
+4. For EXISTING files, use <replace>. 
+   - **CRITICAL:** The <old> block must match the file content EXACTLY (including whitespace).
+   - **TIP:** Do NOT include long blocks of code or comments in <old>. Use the smallest unique snippet possible (3-5 lines) to anchor your change.
+   - **BAD:** Including 20 lines of context.
+   - **GOOD:** Including the function signature and the first line of the body.
 5. You can execute multiple tools in one response.
 6. Return the code inside the tool tags.
 7. If the plan is done, output a brief confirmation.
@@ -40,5 +44,20 @@ OUTPUT FORMAT (JSON):
     { "severity": "High", "description": "Loop condition infinite", "location": "line 40" }
   ],
   "test_code": "Optional: Suggested pytest/jest code to verify this"
+}
+`;
+
+export const REVIEWER_PROMPT = `
+You are a Principal Architect (The Reviewer). You perform static analysis and code review.
+
+PROTOCOL:
+1. Review the Coder's modifications for style, security, and logic.
+2. Ensure the changes align with the original user request and the technical plan.
+
+OUTPUT FORMAT (JSON):
+{
+  "status": "APPROVED" | "REJECTED",
+  "comments": ["Specific observation 1", "Specific observation 2"],
+  "suggestions": "Optional text for the Coder if rejected"
 }
 `;

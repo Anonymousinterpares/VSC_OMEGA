@@ -39,6 +39,12 @@ export interface IFileNode {
   children?: IFileNode[]; // For folders
 }
 
+export interface ITask {
+    id: string;
+    description: string;
+    status: 'pending' | 'completed' | 'rejected';
+}
+
 export interface IAppSettings {
   geminiApiKey: string;
   selectedModel: 'gemini-3-pro-preview' | 'gemini-3-flash-preview';
