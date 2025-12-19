@@ -19,8 +19,8 @@ export const ActiveContextList = () => {
                     </div>
                 )}
                 {activeContext.map(item => (
-                    <div key={item.id} className="bg-gray-800 rounded border border-gray-700 p-2 text-xs relative group">
-                        <div className="font-bold text-blue-300 mb-1 truncate" title={item.path}>
+                    <div key={item.id} className="bg-gray-800 rounded border border-gray-700 p-2 text-xs relative group" title={item.content}>
+                        <div className="font-bold text-blue-300 mb-1 truncate">
                             {item.path.replace(/\\/g, '/').split('/').pop()}
                         </div>
                         <div className="text-gray-500 font-mono">

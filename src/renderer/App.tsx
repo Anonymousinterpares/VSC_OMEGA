@@ -126,10 +126,11 @@ function App() {
             const model = ed.getModel();
             if (selection && model && !selection.isEmpty()) {
                 const content = model.getValueInRange(selection);
+                const currentFile = useFileStore.getState().selectedFile;
                 addContextItem({
                     id: Date.now().toString(),
                     type: 'fragment',
-                    path: selectedFile || 'Untitled',
+                    path: currentFile || 'Untitled',
                     content: content,
                     startLine: selection.startLineNumber,
                     endLine: selection.endLineNumber
