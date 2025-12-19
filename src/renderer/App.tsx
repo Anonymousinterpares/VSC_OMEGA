@@ -17,6 +17,7 @@ function App() {
   const { highlightTarget, setHighlightTarget } = useSearchStore();
   
   const [fileContent, setFileContent] = useState("// Welcome to The Hive");
+  const [isDirty, setIsDirty] = useState(false);
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<any>(null);
   const decorationsCollection = useRef<any>(null);
@@ -27,6 +28,7 @@ function App() {
         try {
             const content = await window.electron.ipcRenderer.invoke(CHANNELS.TO_MAIN.READ_FILE, selectedFile);
             setFileContent(content);
+            setIsDirty(false); // Reset dirty state on file load
         } catch (error) {
             console.error("Failed to read file:", error);
             setFileContent("// Error reading file");
@@ -90,6 +92,7 @@ function App() {
           const removeListener = window.electron.ipcRenderer.on(CHANNELS.TO_RENDERER.FILE_UPDATED, (data: { path: string, content: string }) => {
               if (selectedFile && data.path === selectedFile) {
                   setFileContent(data.content);
+                  setIsDirty(false); // updates from backend (e.g. LLM or Save) are 'clean'
               }
           });
           return () => removeListener();
@@ -126,6 +129,7 @@ function App() {
 
   const handleFileChange = (value: string | undefined) => {
       setFileContent(value || '');
+      setIsDirty(true);
   };
 
   // Simple Save on Ctrl+S
@@ -133,14 +137,22 @@ function App() {
       const handleSave = async (e: KeyboardEvent) => {
           if ((e.ctrlKey || e.metaKey) && e.key === 's') {
               e.preventDefault();
-              if (selectedFile && window.electron) {
-                 console.log("Save requested (Not fully implemented for User manual save yet)");
+              if (selectedFile && window.electron && isDirty) {
+                 try {
+                     await window.electron.ipcRenderer.invoke(CHANNELS.TO_MAIN.WRITE_FILE, {
+                         filePath: selectedFile,
+                         content: fileContent
+                     });
+                     // setIsDirty(false); // Handled by FILE_UPDATED event usually, but we can set it here too to be snappy
+                 } catch (err) {
+                     console.error("Failed to save:", err);
+                 }
               }
           }
       };
       window.addEventListener('keydown', handleSave);
       return () => window.removeEventListener('keydown', handleSave);
-  }, [selectedFile, fileContent]);
+  }, [selectedFile, fileContent, isDirty]);
 
   return (
     <div className="flex h-screen w-screen bg-gray-950 text-gray-300 overflow-hidden font-sans relative">
@@ -156,7 +168,10 @@ function App() {
       <div className="flex-1 flex flex-col bg-[#1e1e1e] min-w-0">
          {/* Tabs (Placeholder) */}
          <div className="h-9 bg-[#2d2d2d] flex items-center px-4 border-b border-black/20 text-sm text-gray-300">
-            <span>{selectedFile ? selectedFile.replace(/\\/g, '/').split('/').pop() : 'Welcome'}</span>
+            <span>
+                {selectedFile ? selectedFile.replace(/\\/g, '/').split('/').pop() : 'Welcome'}
+                {isDirty && <span className="ml-2 text-white font-bold">*</span>}
+            </span>
          </div>
          <div className="flex-1 relative">
             <Editor 
