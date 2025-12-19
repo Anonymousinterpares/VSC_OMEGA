@@ -55,8 +55,14 @@ export class AgentOrchestrator {
       }
   }
 
+  private emitStatus(agent: string) {
+      if (this.mainWindow) {
+          this.mainWindow.webContents.send(CHANNELS.TO_RENDERER.AGENT_STATUS_UPDATE, { agent });
+      }
+  }
+
   async handleMessage(request: IOrchestratorRequest): Promise<IOrchestratorResponse> {
-    const { agent, message, context } = request;
+    const { message, context } = request;
     const steps: { agent: string, input: string, output: string, reasoning?: string }[] = [];
     const autoApply = context?.autoApply ?? true;
     const autoMarkTasks = context?.autoMarkTasks ?? false;
@@ -88,6 +94,7 @@ export class AgentOrchestrator {
 
         // --- 1. Router Step (Determine who goes next) ---
         if (nextAgent === 'Router') {
+            this.emitStatus('Router');
             const routerSystemPrompt = ROUTER_PROMPT;
             
             // Inject Task List into context
@@ -119,6 +126,8 @@ export class AgentOrchestrator {
                 if (nextAgent === 'FINISH') {
                     break;
                 }
+                
+                this.emitStatus(nextAgent);
 
                 currentInput = currentHistory + taskContext;
 

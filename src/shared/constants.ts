@@ -10,13 +10,15 @@ export const CHANNELS = {
     TASK_CONFIRMATION_DECISION: 'task-confirmation-decision',
     ABORT_WORKFLOW: 'abort-workflow'
   },
-  TO_RENDERER: {
-    AGENT_STEP_UPDATE: 'agent-step-update',
-    AGENT_CONTENT_UPDATE: 'agent-content-update',
-    FOLDER_OPENED: 'folder-opened',
-    PROPOSE_CHANGE: 'propose-change',
-    REFRESH_TREE: 'refresh-tree',
-    FILE_UPDATED: 'file-updated',
-    REQUEST_TASK_CONFIRMATION: 'request-task-confirmation'
-  }
+    TO_RENDERER: {
+        AGENT_STEP_UPDATE: 'agent:step-update',
+        AGENT_CONTENT_UPDATE: 'agent:content-update',
+        AGENT_STATUS_UPDATE: 'agent:status-update',
+        FOLDER_OPENED: 'file:folder-opened',
+        FILE_READ: 'file:read',
+        FILE_UPDATED: 'file:updated',
+        REFRESH_TREE: 'file:refresh-tree',
+        PROPOSE_CHANGE: 'proposal:change',
+        REQUEST_TASK_CONFIRMATION: 'proposal:task-confirmation'
+    }
 };

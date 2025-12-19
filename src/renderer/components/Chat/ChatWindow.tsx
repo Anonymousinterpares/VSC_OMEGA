@@ -192,6 +192,7 @@ export const ChatWindow: React.FC = () => {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<IAgentMessage[]>([]);
   const [isThinking, setIsThinking] = useState(false);
+  const [currentAgent, setCurrentAgent] = useState<string | null>(null);
   const [autoApply, setAutoApply] = useState(true);
   const [autoMarkTasks, setAutoMarkTasks] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -234,9 +235,14 @@ export const ChatWindow: React.FC = () => {
             });
         });
 
+        const removeStatusListener = window.electron.ipcRenderer.on(CHANNELS.TO_RENDERER.AGENT_STATUS_UPDATE, (data: { agent: string }) => {
+            setCurrentAgent(data.agent);
+        });
+
           return () => {
               removeStepListener();
               removeContentListener();
+              removeStatusListener();
           };
       }
   }, []);
@@ -245,6 +251,7 @@ export const ChatWindow: React.FC = () => {
       if (isThinking || !window.electron) return;
       
       setIsThinking(true);
+      setCurrentAgent(step.agent);
       try {
           // Send request to run ONLY this agent with the stored input
           const response = await window.electron.ipcRenderer.invoke(CHANNELS.TO_MAIN.SEND_MESSAGE, {
@@ -268,6 +275,7 @@ export const ChatWindow: React.FC = () => {
           console.error("Retry failed", err);
       } finally {
           setIsThinking(false);
+          setCurrentAgent(null);
       }
   };
 
@@ -275,6 +283,7 @@ export const ChatWindow: React.FC = () => {
     if (window.electron) {
         await window.electron.ipcRenderer.invoke(CHANNELS.TO_MAIN.ABORT_WORKFLOW);
         setIsThinking(false);
+        setCurrentAgent(null);
     }
   };
 
@@ -292,6 +301,7 @@ export const ChatWindow: React.FC = () => {
     setMessages(prev => [...prev, userMsg]);
     setInput('');
     setIsThinking(true);
+    setCurrentAgent('Router'); // Initial state
 
     // Add Placeholder Bot Message
     const botId = (Date.now() + 1).toString();
@@ -347,6 +357,7 @@ export const ChatWindow: React.FC = () => {
         setMessages(prev => prev.map(msg => msg.id === botId ? { ...msg, isStreaming: false } : msg));
     } finally {
         setIsThinking(false);
+        setCurrentAgent(null);
     }
   };
 
@@ -421,6 +432,12 @@ export const ChatWindow: React.FC = () => {
 
       {/* Input */}
       <div className="p-4 bg-gray-900 border-t border-gray-800">
+        {isThinking && currentAgent && (
+            <div className="mb-2 flex items-center space-x-2 animate-pulse">
+                <span className="text-xs font-mono text-blue-400 font-bold">{currentAgent}</span>
+                <span className="text-xs text-gray-500">is working...</span>
+            </div>
+        )}
         <div className="relative">
           <textarea
             className="w-full bg-gray-800 border border-gray-700 rounded-lg pl-3 pr-10 py-2 text-sm text-white focus:outline-none focus:border-blue-500 resize-none"
