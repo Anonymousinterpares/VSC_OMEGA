@@ -49,3 +49,24 @@ export interface IAppSettings {
   geminiApiKey: string;
   selectedModel: 'gemini-3-pro-preview' | 'gemini-3-flash-preview';
 }
+
+export interface ISearchMatch {
+    lineText: string;
+    lineNumber: number; // 1-based
+    matchIndex: number; // 0-based index in line
+    matchLength: number;
+}
+
+export interface ISearchResult {
+    filePath: string;
+    matches: ISearchMatch[];
+}
+
+export interface ISearchOptions {
+    query: string;
+    matchCase: boolean;
+    matchWholeWord: boolean;
+    useRegex: boolean;
+    includes: string; // semicolon delimited
+    excludes: string; // semicolon delimited
+}

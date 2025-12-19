@@ -1,7 +1,7 @@
 import { dialog, BrowserWindow } from 'electron';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { IFileNode } from '../../shared/types';
+import { IFileNode, ISearchResult, ISearchMatch, ISearchOptions } from '../../shared/types';
 import { CHANNELS } from '../../shared/constants';
 
 export class FileSystemService {
@@ -79,10 +79,8 @@ export class FileSystemService {
           const backupPath = path.join(historyDir, `${filename}.${timestamp}.bak`);
           
           await fs.copyFile(resolvedPath, backupPath);
-          // console.log(`Backup created at ${backupPath}`);
       } catch (err) {
           console.error("Failed to create backup:", err);
-          // We don't block the write if backup fails, but we log it.
       }
   }
 
@@ -94,7 +92,6 @@ export class FileSystemService {
     if (this.projectRoot) {
       return path.join(this.projectRoot, filePath);
     }
-    // Fallback to CWD (or maybe should throw error if no folder open?)
     return path.resolve(filePath);
   }
 
@@ -121,7 +118,6 @@ export class FileSystemService {
     for (const entry of entries) {
       const fullPath = path.join(dirPath, entry.name);
       
-      // Basic Ignore List
       if (ignoreList.includes(entry.name)) {
         continue;
       }
@@ -133,7 +129,6 @@ export class FileSystemService {
           path: fullPath,
           type: 'folder',
           children: children.sort((a, b) => {
-             // Folders first
              if (a.type === b.type) return a.name.localeCompare(b.name);
              return a.type === 'folder' ? -1 : 1;
           })
@@ -147,51 +142,101 @@ export class FileSystemService {
       }
     }
 
-    // Sort: Folders first, then files
     return nodes.sort((a, b) => {
         if (a.type === b.type) return a.name.localeCompare(b.name);
         return a.type === 'folder' ? -1 : 1;
     });
   }
 
-  async handleSearch(query: string, type: 'file' | 'content' | 'symbol' = 'content'): Promise<string> {
+  async handleSearch(options: ISearchOptions): Promise<ISearchResult[]> {
     if (!this.projectRoot) {
-        return "Error: No project folder is open.";
+        return [];
     }
 
-    const results: string[] = [];
+    const { query, matchCase, matchWholeWord, useRegex, includes, excludes } = options;
+    const results: ISearchResult[] = [];
+
+    // Parse patterns
+    const includePatterns = includes ? includes.split(';').map(s => s.trim()).filter(Boolean) : [];
+    const excludePatterns = excludes ? excludes.split(';').map(s => s.trim()).filter(Boolean) : [];
+    
+    // Prepare Regex
+    let searchRegex: RegExp;
+    try {
+        let flags = 'g';
+        if (!matchCase) flags += 'i';
+        
+        let pattern = query;
+        if (!useRegex) {
+            // Escape special chars
+            pattern = pattern.replace(/[.*+?^${}()|[\\]/g, '\\$&');
+        }
+        
+        if (matchWholeWord) {
+            pattern = `\\b${pattern}\\b`;
+        }
+        
+        searchRegex = new RegExp(pattern, flags);
+    } catch (e) {
+        console.error("Invalid Regex:", e);
+        return [];
+    }
+
     const searchInternal = async (dir: string) => {
         try {
             const entries = await fs.readdir(dir, { withFileTypes: true });
             for (const entry of entries) {
                 const fullPath = path.join(dir, entry.name);
-                
-                // Skip common ignored folders
+                const relativePath = path.relative(this.projectRoot!, fullPath).replace(/\\/g, '/');
+
+                // Default Excludes
                 if (['node_modules', '.git', 'dist', 'out', 'build', '.hive'].includes(entry.name)) continue;
+                
+                // User Excludes
+                if (excludePatterns.some(p => this.matchesPattern(relativePath, p))) continue;
 
                 if (entry.isDirectory()) {
                     await searchInternal(fullPath);
                 } else {
-                    if (type === 'file') {
-                        if (entry.name.toLowerCase().includes(query.toLowerCase())) {
-                            results.push(`FILE: ${fullPath}`);
-                        }
-                    } else {
-                        // Content or Symbol search
-                        try {
-                            const content = await fs.readFile(fullPath, 'utf-8');
-                            // Simple case-insensitive search
-                            const lines = content.split('\n');
-                            lines.forEach((line, index) => {
-                                if (line.toLowerCase().includes(query.toLowerCase())) {
-                                    // Limit line length for display
-                                    const trimmedLine = line.trim().substring(0, 100); 
-                                    results.push(`${fullPath} (Line ${index + 1}): ${trimmedLine}`);
+                    // Include Check (if specified)
+                    if (includePatterns.length > 0 && !includePatterns.some(p => this.matchesPattern(relativePath, p))) {
+                        continue;
+                    }
+
+                    // Perform Search
+                    try {
+                        const content = await fs.readFile(fullPath, 'utf-8');
+                        const fileMatches: ISearchMatch[] = [];
+                        const lines = content.split('\n');
+                        
+                        lines.forEach((line: string, lineIdx: number) => {
+                            // Reset lastIndex for global regex
+                            searchRegex.lastIndex = 0;
+                            let match;
+                            
+                            while ((match = searchRegex.exec(line)) !== null) {
+                                fileMatches.push({
+                                    lineText: line.trimEnd(),
+                                    lineNumber: lineIdx + 1,
+                                    matchIndex: match.index,
+                                    matchLength: match[0].length
+                                });
+                                // Avoid infinite loop on zero-width matches
+                                if (match.index === searchRegex.lastIndex) {
+                                    searchRegex.lastIndex++;
                                 }
+                            }
+                        });
+
+                        if (fileMatches.length > 0) {
+                            results.push({
+                                filePath: fullPath,
+                                matches: fileMatches
                             });
-                        } catch (err) {
-                            // Ignore binary read errors etc
                         }
+
+                    } catch (err) {
+                        // Ignore binary/read errors
                     }
                 }
             }
@@ -201,9 +246,77 @@ export class FileSystemService {
     };
 
     await searchInternal(this.projectRoot);
-    
-    if (results.length === 0) return "No matches found.";
-    // Limit to top 50 results to save context
-    return results.slice(0, 50).join('\n');
+    return results;
+  }
+
+  async handleReplace(options: ISearchOptions, replaceText: string): Promise<{ filesChanged: number; matchesReplaced: number }> {
+    if (!this.projectRoot) return { filesChanged: 0, matchesReplaced: 0 };
+
+    const { query, matchCase, matchWholeWord, useRegex, includes, excludes } = options;
+    let filesChanged = 0;
+    let matchesReplaced = 0;
+
+    // Parse patterns
+    const includePatterns = includes ? includes.split(';').map(s => s.trim()).filter(Boolean) : [];
+    const excludePatterns = excludes ? excludes.split(';').map(s => s.trim()).filter(Boolean) : [];
+
+    // Prepare Regex
+    let searchRegex: RegExp;
+    try {
+        let flags = 'g';
+        if (!matchCase) flags += 'i';
+        let pattern = query;
+        if (!useRegex) pattern = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        if (matchWholeWord) pattern = `\\b${pattern}\\b`;
+        searchRegex = new RegExp(pattern, flags);
+    } catch (e) {
+        return { filesChanged: 0, matchesReplaced: 0 };
+    }
+
+    const replaceInternal = async (dir: string) => {
+        const entries = await fs.readdir(dir, { withFileTypes: true });
+        for (const entry of entries) {
+            const fullPath = path.join(dir, entry.name);
+            const relativePath = path.relative(this.projectRoot!, fullPath).replace(/\\/g, '/');
+
+            if (['node_modules', '.git', 'dist', 'out', 'build', '.hive'].includes(entry.name)) continue;
+            if (excludePatterns.some(p => this.matchesPattern(relativePath, p))) continue;
+
+            if (entry.isDirectory()) {
+                await replaceInternal(fullPath);
+            } else {
+                if (includePatterns.length > 0 && !includePatterns.some(p => this.matchesPattern(relativePath, p))) continue;
+
+                try {
+                    const content = await fs.readFile(fullPath, 'utf-8');
+                    let matchCount = 0;
+                    const newContent = content.replace(searchRegex, (match) => {
+                        matchCount++;
+                        return replaceText;
+                    });
+
+                    if (matchCount > 0) {
+                        await this.handleWriteFile(fullPath, newContent);
+                        filesChanged++;
+                        matchesReplaced += matchCount;
+                    }
+                } catch (err) {}
+            }
+        }
+    };
+
+    await replaceInternal(this.projectRoot);
+    return { filesChanged, matchesReplaced };
+  }
+
+  private matchesPattern(filePath: string, pattern: string): boolean {
+      let regexStr = pattern
+          .replace(/\./g, '\\.')
+          .replace(/\*\*/g, '___DOUBLE_WILD___')
+          .replace(/\*/g, '[^/]*')
+          .replace(/___DOUBLE_WILD___/g, '.*');
+      
+      const regex = new RegExp(`^${regexStr}$`);
+      return regex.test(filePath) || filePath.endsWith(pattern.replace(/^\*\*/, '')); 
   }
 }

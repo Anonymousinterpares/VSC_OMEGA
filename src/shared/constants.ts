@@ -3,6 +3,8 @@ export const CHANNELS = {
     OPEN_FOLDER: 'open-folder',
     READ_FILE: 'read-file',
     WRITE_FILE: 'write-file',
+    SEARCH_IN_FILES: 'search-in-files',
+    REPLACE_IN_FILES: 'replace-in-files',
     SEND_MESSAGE: 'send-message',
     REVIEW_DECISION: 'review-decision',
     GET_SETTINGS: 'get-settings',

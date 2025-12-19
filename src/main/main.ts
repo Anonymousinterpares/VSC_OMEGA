@@ -57,6 +57,14 @@ app.whenReady().then(() => {
     return await fileSystemService.handleWriteFile(filePath, content);
   });
 
+  ipcMain.handle(CHANNELS.TO_MAIN.SEARCH_IN_FILES, async (_, options) => {
+    return await fileSystemService.handleSearch(options);
+  });
+
+  ipcMain.handle(CHANNELS.TO_MAIN.REPLACE_IN_FILES, async (_, { options, replaceText }) => {
+    return await fileSystemService.handleReplace(options, replaceText);
+  });
+
   ipcMain.handle(CHANNELS.TO_MAIN.GET_SETTINGS, async () => {
     return await settingsService.getSettings();
   });
