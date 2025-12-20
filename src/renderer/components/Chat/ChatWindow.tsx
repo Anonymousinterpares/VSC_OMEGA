@@ -48,10 +48,8 @@ const CollapsibleLog: React.FC<{
 
 // Parsed Message Renderer
 const FormattedMessage: React.FC<{ content: string }> = ({ content }) => {
-  // Regex to split by tags. Captures the full tag block.
-  // Supports: <thought>, <write_file>, <replace>, <read_file>
-  // Note: This matches both closed AND open tags for streaming support
-  const tagRegex = /<(thought|write_file|replace|read_file)(?: path="([^"]+)")?>([\s\S]*?)(?:<\/\1>|$)/g;
+  // Regex to split by tags.
+  const tagRegex = /<(thought|write_file|replace|read_file)(?: path="([^"]+)")?>([\s\S]*?)(?:<\/\1>|$)|--- Next Step: (.*?) ---|\[System Tool Output\]:([\s\S]*?)(?=\n\n|---|$)|\[System: Agent marked (.*?) as completed\]|✅ \*\*Auto-completed:\*\* (.*?)(?=\n|$)/g;
 
   let lastIndex = 0;
   let match;
@@ -63,48 +61,84 @@ const FormattedMessage: React.FC<{ content: string }> = ({ content }) => {
           parsedElements.push(<span key={`text-${lastIndex}`} className="whitespace-pre-wrap">{content.substring(lastIndex, match.index)}</span>);
       }
 
-      const tagName = match[1];
-      const path = match[2]; // Might be undefined
-      const innerContent = match[3];
+      const [fullMatch, tagName, path, innerContent, nextAgent, toolOutput, markedTask, autoCompletedTask] = match;
 
-      if (tagName === 'thought') {
+      if (tagName) {
+          const isComplete = fullMatch.endsWith(`</${tagName}>`);
+          
+          if (tagName === 'thought') {
+              parsedElements.push(
+                  <details key={`thought-${match.index}`} open={!isComplete} className="mb-2 bg-gray-900/30 rounded border border-gray-800">
+                      <summary className="cursor-pointer px-3 py-1 text-[10px] font-mono text-gray-500 hover:text-gray-400 select-none flex items-center">
+                          <ChevronRight size={12} className="mr-1 transform transition-transform details-open:rotate-90" />
+                          Thinking Process {isComplete ? '(Complete)' : '(Thinking...)'}
+                      </summary>
+                      <div className="p-3 text-gray-500 font-mono text-xs whitespace-pre-wrap border-t border-gray-800/50">
+                          {innerContent.trim()}
+                      </div>
+                  </details>
+              );
+          } else if (tagName === 'write_file' || tagName === 'replace') {
+              parsedElements.push(
+                  <div key={`file-${match.index}`} className="mb-2 border border-blue-900/30 rounded overflow-hidden">
+                      <div className="bg-blue-900/10 px-3 py-1 text-xs font-mono flex items-center justify-between text-blue-400/70">
+                          <span className="font-semibold flex items-center">
+                              {tagName === 'write_file' ? '📝' : '🔧'} {path || 'File'}
+                          </span>
+                          {!isComplete && <span className="animate-pulse text-[10px] bg-blue-900/40 px-2 py-0.5 rounded text-blue-300">LIVE</span>}
+                      </div>
+                      <details open={!isComplete}>
+                          <summary className="px-3 py-1 bg-black/10 text-[10px] text-gray-600 cursor-pointer hover:text-gray-400 select-none">
+                              {isComplete ? 'Show Content' : 'Writing Content...'}
+                          </summary>
+                          <div className="p-3 bg-black/20 text-gray-400 font-mono text-xs whitespace-pre-wrap overflow-x-auto max-h-[300px]">
+                              {innerContent}
+                          </div>
+                      </details>
+                  </div>
+              );
+          } else if (tagName === 'read_file') {
+               parsedElements.push(
+                   <div key={`read-${match.index}`} className="inline-block mr-1 mb-1">
+                       <span className="px-2 py-0.5 rounded bg-gray-800/50 border border-gray-700/50 text-[10px] font-mono text-gray-500">
+                           📖 Read: {innerContent.trim()}
+                       </span>
+                   </div>
+               );
+          }
+      } else if (nextAgent) {
           parsedElements.push(
-              <details key={`thought-${match.index}`} open className="mb-2 bg-gray-900/50 rounded border border-gray-700">
-                  <summary className="cursor-pointer px-3 py-1 text-xs font-mono text-gray-500 hover:text-gray-300 select-none">
-                      Thinking Process
+              <div key={`next-${match.index}`} className="my-4 flex items-center space-x-2 opacity-50">
+                  <div className="flex-1 h-[1px] bg-gray-700"></div>
+                  <span className="text-[10px] font-mono text-gray-500 uppercase tracking-widest">Transition to {nextAgent}</span>
+                  <div className="flex-1 h-[1px] bg-gray-700"></div>
+              </div>
+          );
+      } else if (toolOutput) {
+          parsedElements.push(
+              <details key={`tool-${match.index}`} className="mb-2 bg-green-900/5 rounded border border-green-900/20">
+                  <summary className="cursor-pointer px-3 py-1 text-[10px] font-mono text-green-700/60 hover:text-green-600 select-none">
+                      System Tool Logs
                   </summary>
-                  <div className="p-3 text-gray-400 font-mono text-xs whitespace-pre-wrap border-t border-gray-700">
-                      {innerContent.trim()}
+                  <div className="p-2 text-[10px] text-green-800/50 font-mono whitespace-pre-wrap border-t border-green-900/10">
+                      {toolOutput.trim()}
                   </div>
               </details>
           );
-      } else if (tagName === 'write_file' || tagName === 'replace') {
+      } else if (markedTask) {
           parsedElements.push(
-              <div key={`file-${match.index}`} className="mb-2 border border-blue-900/50 rounded overflow-hidden">
-                  <div className="bg-blue-900/20 px-3 py-1 text-xs font-mono flex items-center justify-between text-blue-300">
-                      <span className="font-bold flex items-center">
-                          {tagName === 'write_file' ? '📝 Write File' : '🔧 Patch File'}: {path || 'Unknown'}
-                      </span>
-                      <span className="animate-pulse text-[10px] bg-blue-900/50 px-2 py-0.5 rounded text-blue-200">LIVE</span>
-                  </div>
-                  <details open>
-                      <summary className="px-3 py-1 bg-black/20 text-[10px] text-gray-500 cursor-pointer hover:text-gray-300">
-                          Show Content
-                      </summary>
-                      <div className="p-3 bg-black/40 text-gray-300 font-mono text-xs whitespace-pre-wrap overflow-x-auto">
-                          {innerContent}
-                      </div>
-                  </details>
+              <div key={`mark-${match.index}`} className="text-[10px] text-gray-500 font-mono italic mb-1 flex items-center">
+                  <div className="w-1.5 h-1.5 rounded-full bg-blue-500/50 mr-2"></div>
+                  System: {markedTask} marked as completed.
               </div>
           );
-      } else if (tagName === 'read_file') {
-           parsedElements.push(
-               <div key={`read-${match.index}`} className="inline-block mr-1 mb-1">
-                   <span className="px-2 py-0.5 rounded bg-gray-800 border border-gray-700 text-[10px] font-mono text-gray-500">
-                       📖 Read: {innerContent.trim()}
-                   </span>
-               </div>
-           );
+      } else if (autoCompletedTask) {
+          parsedElements.push(
+              <div key={`auto-${match.index}`} className="my-2 p-2 bg-green-900/10 border border-green-900/20 rounded flex items-center text-xs text-green-400/80">
+                  <span className="mr-2">✅</span>
+                  <span>{autoCompletedTask.trim()}</span>
+              </div>
+          );
       }
 
       lastIndex = tagRegex.lastIndex;
