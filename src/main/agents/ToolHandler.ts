@@ -1,10 +1,21 @@
 import { FileSystemService } from '../services/FileSystem';
 import { ProposalManager } from '../services/ProposalManager';
 
-interface IToolResult {
+export interface IToolAction {
+    type: 'write' | 'read' | 'replace';
+    path: string;
+}
+
+export interface IToolResult {
     llmOutput: string;
     userOutput: string;
-    actions: { type: 'write' | 'read' | 'replace', path: string }[];
+    actions: IToolAction[];
+}
+
+export interface ISingleToolResult {
+    llmOutput: string;
+    userOutput: string;
+    action: IToolAction | null;
 }
 
 export class ToolHandler {
@@ -16,25 +27,17 @@ export class ToolHandler {
     this.proposalManager = proposalManager;
   }
 
-  async executeTools(response: string, autoApply = true): Promise<IToolResult | null> {
-    const actions: { type: 'write' | 'read' | 'replace', path: string }[] = [];
-    let llmOutputAccumulator = "";
-    let userOutputAccumulator = "";
-    let toolsFound = false;
+  // --- Atomic Execution Methods ---
 
-    // 1. Handle <write_file>
-    const writeRegex = /<write_file path="([^"]+)">([\s\S]*?)<\/write_file>/g;
-    let writeMatch;
-    while ((writeMatch = writeRegex.exec(response)) !== null) {
-      toolsFound = true;
-      const path = writeMatch[1];
-      const content = writeMatch[2];
+  async executeWrite(path: string, content: string, autoApply: boolean): Promise<ISingleToolResult> {
       try {
         if (autoApply) {
             await this.fileSystem.handleWriteFile(path, content);
-            const msg = `[System] Successfully wrote to ${path}`;
-            llmOutputAccumulator += `\n${msg}`;
-            userOutputAccumulator += `\n${msg}`;
+            return {
+                llmOutput: `\n[System] Successfully wrote to ${path}`,
+                userOutput: `\n[System] Successfully wrote to ${path}`,
+                action: { type: 'write', path }
+            };
         } else {
             // PROPOSE NEW FILE
             const result = await this.proposalManager.requestApproval({
@@ -47,32 +50,29 @@ export class ToolHandler {
 
             if (result.status === 'accepted') {
                 await this.fileSystem.handleWriteFile(path, result.content || content);
-                const msg = `[System] User APPROVED new file creation: ${path}`;
-                llmOutputAccumulator += `\n${msg}`;
-                userOutputAccumulator += `\n${msg}`;
+                return {
+                    llmOutput: `\n[System] User APPROVED new file creation: ${path}`,
+                    userOutput: `\n[System] User APPROVED new file creation: ${path}`,
+                    action: { type: 'write', path }
+                };
             } else {
-                const msg = `[System] User REJECTED new file creation: ${path}`;
-                llmOutputAccumulator += `\n${msg}`;
-                userOutputAccumulator += `\n${msg}`;
+                return {
+                    llmOutput: `\n[System] User REJECTED new file creation: ${path}`,
+                    userOutput: `\n[System] User REJECTED new file creation: ${path}`,
+                    action: null
+                };
             }
         }
-        actions.push({ type: 'write', path });
       } catch (e: any) {
-        const msg = `[System] Error writing to ${path}: ${e.message}`;
-        llmOutputAccumulator += `\n${msg}`;
-        userOutputAccumulator += `\n${msg}`;
+        return {
+            llmOutput: `\n[System] Error writing to ${path}: ${e.message}`,
+            userOutput: `\n[System] Error writing to ${path}: ${e.message}`,
+            action: null
+        };
       }
-    }
+  }
 
-    // 2. Handle <replace> (Diffs)
-    const replaceRegex = /<replace path="([^"]+)">\s*<old>([\s\S]*?)<\/old>\s*<new>([\s\S]*?)<\/new>\s*<\/replace>/g;
-    let replaceMatch;
-    while ((replaceMatch = replaceRegex.exec(response)) !== null) {
-      toolsFound = true;
-      const path = replaceMatch[1];
-      const oldString = replaceMatch[2];
-      const newString = replaceMatch[3];
-      
+  async executeReplace(path: string, oldString: string, newString: string, autoApply: boolean): Promise<ISingleToolResult> {
       try {
           const currentContent = await this.fileSystem.handleReadFile(path);
           let targetBlock = oldString;
@@ -94,9 +94,11 @@ export class ToolHandler {
               if (autoApply) {
                   const newContent = currentContent.replace(targetBlock, newString);
                   await this.fileSystem.handleWriteFile(path, newContent);
-                  const msg = `[System] Successfully patched ${path}`;
-                  llmOutputAccumulator += `\n${msg}`;
-                  userOutputAccumulator += `\n${msg}`;
+                  return {
+                      llmOutput: `\n[System] Successfully patched ${path}`,
+                      userOutput: `\n[System] Successfully patched ${path}`,
+                      action: { type: 'replace', path }
+                  };
               } else {
                   // PROPOSE EDIT
                   const proposedContent = currentContent.replace(targetBlock, newString);
@@ -109,28 +111,81 @@ export class ToolHandler {
                   });
 
                   if (result.status === 'accepted') {
-                      // User might have edited the content in the review window
                       await this.fileSystem.handleWriteFile(path, result.content || proposedContent);
-                      const msg = `[System] User APPROVED edit to ${path}`;
-                      llmOutputAccumulator += `\n${msg}`;
-                      userOutputAccumulator += `\n${msg}`;
+                      return {
+                          llmOutput: `\n[System] User APPROVED edit to ${path}`,
+                          userOutput: `\n[System] User APPROVED edit to ${path}`,
+                          action: { type: 'replace', path }
+                      };
                   } else {
-                      const msg = `[System] User REJECTED edit to ${path}`;
-                      llmOutputAccumulator += `\n${msg}`;
-                      userOutputAccumulator += `\n${msg}`;
+                      return {
+                          llmOutput: `\n[System] User REJECTED edit to ${path}`,
+                          userOutput: `\n[System] User REJECTED edit to ${path}`,
+                          action: null
+                      };
                   }
               }
-              actions.push({ type: 'replace', path });
           } else {
-               const msg = `[System] Replace failed: 'old' string not found in ${path}. \n\nHINT: Ensure <old> tag content matches the file EXACTLY, including whitespace and indentation.`;
-               llmOutputAccumulator += `\n${msg}`;
-               userOutputAccumulator += `\n${msg}`;
+               return {
+                   llmOutput: `\n[System] Replace failed: 'old' string not found in ${path}. \n\nHINT: Ensure <old> tag content matches the file EXACTLY, including whitespace and indentation.`,
+                   userOutput: `\n[System] Replace failed: 'old' string not found in ${path}.`,
+                   action: null
+               };
           }
       } catch (e: any) {
-          const msg = `[System] Error replacing in ${path}: ${e.message}`;
-          llmOutputAccumulator += `\n${msg}`;
-          userOutputAccumulator += `\n${msg}`;
+          return {
+              llmOutput: `\n[System] Error replacing in ${path}: ${e.message}`,
+              userOutput: `\n[System] Error replacing in ${path}: ${e.message}`,
+              action: null
+          };
       }
+  }
+
+  async executeRead(path: string): Promise<ISingleToolResult> {
+      try {
+        const content = await this.fileSystem.handleReadFile(path);
+        return {
+            llmOutput: `\n### FILE: ${path}\n${content}\n### END FILE\n`,
+            userOutput: `\n[System] Read file: ${path}`,
+            action: { type: 'read', path }
+        };
+      } catch (e: any) {
+        return {
+            llmOutput: `\n[System] Error reading ${path}: ${e.message}`,
+            userOutput: `\n[System] Error reading ${path}: ${e.message}`,
+            action: null
+        };
+      }
+  }
+
+  // --- Main Processor (Legacy/Batch Support) ---
+
+  async executeTools(response: string, autoApply = true): Promise<IToolResult | null> {
+    const actions: IToolAction[] = [];
+    let llmOutputAccumulator = "";
+    let userOutputAccumulator = "";
+    let toolsFound = false;
+
+    // 1. Handle <write_file>
+    const writeRegex = /<write_file path="([^"]+)">([\s\S]*?)<\/write_file>/g;
+    let writeMatch;
+    while ((writeMatch = writeRegex.exec(response)) !== null) {
+      toolsFound = true;
+      const res = await this.executeWrite(writeMatch[1], writeMatch[2], autoApply);
+      llmOutputAccumulator += res.llmOutput;
+      userOutputAccumulator += res.userOutput;
+      if (res.action) actions.push(res.action);
+    }
+
+    // 2. Handle <replace> (Diffs)
+    const replaceRegex = /<replace path="([^"]+)">\s*<old>([\s\S]*?)<\/old>\s*<new>([\s\S]*?)<\/new>\s*<\/replace>/g;
+    let replaceMatch;
+    while ((replaceMatch = replaceRegex.exec(response)) !== null) {
+      toolsFound = true;
+      const res = await this.executeReplace(replaceMatch[1], replaceMatch[2], replaceMatch[3], autoApply);
+      llmOutputAccumulator += res.llmOutput;
+      userOutputAccumulator += res.userOutput;
+      if (res.action) actions.push(res.action);
     }
 
     // 3. Handle <read_file>
@@ -138,30 +193,18 @@ export class ToolHandler {
     let readMatch;
     while ((readMatch = readRegex.exec(response)) !== null) {
       toolsFound = true;
-      const path = readMatch[1].trim();
-      try {
-        const content = await this.fileSystem.handleReadFile(path);
-        // LLM gets the content
-        llmOutputAccumulator += `\n### FILE: ${path}\n${content}\n### END FILE\n`;
-        // User gets a summary (NO CONTENT DUMP)
-        userOutputAccumulator += `\n[System] Read file: ${path}`;
-        actions.push({ type: 'read', path });
-      } catch (e: any) {
-        const msg = `[System] Error reading ${path}: ${e.message}`;
-        llmOutputAccumulator += `\n${msg}`;
-        userOutputAccumulator += `\n${msg}`;
-      }
+      const res = await this.executeRead(readMatch[1].trim());
+      llmOutputAccumulator += res.llmOutput;
+      userOutputAccumulator += res.userOutput;
+      if (res.action) actions.push(res.action);
     }
 
-    // 4. Handle <search>
+    // 4. Handle <search> (Keeping inline for now as it maps to 'read')
     const searchRegex = /<search\s+query="([^"]+)"(?:\s+type="([^"]+)")?\s*\/>/g;
     let searchMatch;
     while ((searchMatch = searchRegex.exec(response)) !== null) {
         toolsFound = true;
         const query = searchMatch[1];
-        // The 'type' attribute from XML <search> was 'file'|'content'|'symbol'.
-        // Our new Search system uses ISearchOptions.
-        // We'll map the XML request to a content search for now.
         const searchOptions = {
             query: query,
             matchCase: false,
@@ -173,7 +216,6 @@ export class ToolHandler {
         
         try {
             const results = await this.fileSystem.handleSearch(searchOptions);
-            // Format results for LLM
             const formattedResults = results.map(r => 
                 `FILE: ${r.filePath}\n` + 
                 r.matches.map(m => `  ${m.lineNumber}: ${m.lineText}`).join('\n')
@@ -181,7 +223,6 @@ export class ToolHandler {
             
             llmOutputAccumulator += `\n### SEARCH RESULTS ("${query}")\n${formattedResults}\n### END SEARCH\n`;
             userOutputAccumulator += `\n[System] Searched for "${query}"`;
-            // We treat search as a 'read' type action effectively
             actions.push({ type: 'read', path: 'SEARCH:' + query });
         } catch (e: any) {
              const msg = `[System] Error searching ${query}: ${e.message}`;

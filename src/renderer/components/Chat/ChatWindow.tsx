@@ -50,36 +50,12 @@ const CollapsibleLog: React.FC<{
 const FormattedMessage: React.FC<{ content: string }> = ({ content }) => {
   // Regex to split by tags. Captures the full tag block.
   // Supports: <thought>, <write_file>, <replace>, <read_file>
-  // Note: This simple regex assumes no nested tags of the same type.
-  const regex = /(<(thought|write_file|replace|read_file)(?: path="([^"]+)")?>([\s\S]*?)<\/\2>)/g;
-  
-  const parts = content.split(regex);
-  const elements: React.ReactNode[] = [];
+  // Note: This matches both closed AND open tags for streaming support
+  const tagRegex = /<(thought|write_file|replace|read_file)(?: path="([^"]+)")?>([\s\S]*?)(?:<\/\1>|$)/g;
 
-  for (let i = 0; i < parts.length; i++) {
-      const part = parts[i];
-      
-      // The split with capturing groups returns: 
-      // [text, full_tag, tag_name, path_attr, inner_content, text, ...]
-      // We need to detect if 'part' is one of the matched groups or plain text.
-      // Actually, split output structure is:
-      // 0: text before
-      // 1: full tag
-      // 2: tag name
-      // 3: path (undefined if none)
-      // 4: content
-      // 5: text after (becomes next iteration's text before)
-      // BUT, React's split logic or JS split might behave differently with multiple groups.
-      // Let's use a cleaner matchAll approach or just a simple parser.
-  }
-
-  // Simpler Parser Approach
   let lastIndex = 0;
   let match;
   const parsedElements: React.ReactNode[] = [];
-  
-  // Reset regex
-  const tagRegex = /<(thought|write_file|replace|read_file)(?: path="([^"]+)")?>([\s\S]*?)<\/\1>/g;
 
   while ((match = tagRegex.exec(content)) !== null) {
       // Push preceding text
@@ -93,7 +69,7 @@ const FormattedMessage: React.FC<{ content: string }> = ({ content }) => {
 
       if (tagName === 'thought') {
           parsedElements.push(
-              <details key={`thought-${match.index}`} className="mb-2 bg-gray-900/50 rounded border border-gray-700">
+              <details key={`thought-${match.index}`} open className="mb-2 bg-gray-900/50 rounded border border-gray-700">
                   <summary className="cursor-pointer px-3 py-1 text-xs font-mono text-gray-500 hover:text-gray-300 select-none">
                       Thinking Process
                   </summary>
@@ -109,19 +85,19 @@ const FormattedMessage: React.FC<{ content: string }> = ({ content }) => {
                       <span className="font-bold flex items-center">
                           {tagName === 'write_file' ? '📝 Write File' : '🔧 Patch File'}: {path || 'Unknown'}
                       </span>
+                      <span className="animate-pulse text-[10px] bg-blue-900/50 px-2 py-0.5 rounded text-blue-200">LIVE</span>
                   </div>
-                  <details>
+                  <details open>
                       <summary className="px-3 py-1 bg-black/20 text-[10px] text-gray-500 cursor-pointer hover:text-gray-300">
                           Show Content
                       </summary>
                       <div className="p-3 bg-black/40 text-gray-300 font-mono text-xs whitespace-pre-wrap overflow-x-auto">
-                          {innerContent.trim()}
+                          {innerContent}
                       </div>
                   </details>
               </div>
           );
       } else if (tagName === 'read_file') {
-           // Hide read_file blocks mostly, or show small pill
            parsedElements.push(
                <div key={`read-${match.index}`} className="inline-block mr-1 mb-1">
                    <span className="px-2 py-0.5 rounded bg-gray-800 border border-gray-700 text-[10px] font-mono text-gray-500">
@@ -222,13 +198,20 @@ export const ChatWindow: React.FC = () => {
               });
           });
 
-          const removeContentListener = window.electron.ipcRenderer.on(CHANNELS.TO_RENDERER.AGENT_CONTENT_UPDATE, (data: { content: string }) => {
+          const removeContentListener = window.electron.ipcRenderer.on(CHANNELS.TO_RENDERER.AGENT_CONTENT_UPDATE, (data: { content?: string, delta?: string }) => {
             setMessages(prev => {
                 const lastMsg = prev[prev.length - 1];
                 if (lastMsg && lastMsg.role === 'assistant' && lastMsg.isStreaming) {
+                    let newContent = lastMsg.content;
+                    if (data.content) {
+                        newContent = data.content;
+                    } else if (data.delta) {
+                        newContent += data.delta;
+                    }
+
                     return [
                         ...prev.slice(0, -1),
-                        { ...lastMsg, content: data.content }
+                        { ...lastMsg, content: newContent }
                     ];
                 }
                 return prev;

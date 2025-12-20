@@ -14,6 +14,7 @@ interface IProposal {
 export const ReviewWindow: React.FC = () => {
     const [proposal, setProposal] = useState<IProposal | null>(null);
     const [modifiedContent, setModifiedContent] = useState<string>('');
+    const editorRef = React.useRef<any>(null); // Store editor instance
 
     useEffect(() => {
         if (window.electron) {
@@ -25,15 +26,39 @@ export const ReviewWindow: React.FC = () => {
         }
     }, []);
 
+    // Effect to handle listener attachment and cleanup
+    useEffect(() => {
+        if (!editorRef.current || !proposal) return;
+
+        const modifiedEditor = editorRef.current.getModifiedEditor();
+        const disposable = modifiedEditor.onDidChangeModelContent(() => {
+            const model = modifiedEditor.getModel();
+            if (model && !model.isDisposed()) {
+                setModifiedContent(model.getValue());
+            }
+        });
+
+        return () => {
+            disposable.dispose();
+        };
+    }, [proposal]); // Re-attach if proposal (and thus editor key) changes
+
     const handleAccept = async () => {
         if (!proposal || !window.electron) return;
         
         await window.electron.ipcRenderer.invoke(CHANNELS.TO_MAIN.REVIEW_DECISION, {
             id: proposal.id,
             status: 'accepted',
-            content: modifiedContent // User might have edited the right side
+            content: modifiedContent
         });
+
+        // Detach model before unmounting to prevent Monaco race condition
+        if (editorRef.current) {
+            editorRef.current.setModel(null);
+        }
+        
         setProposal(null);
+        editorRef.current = null; 
     };
 
     const handleReject = async () => {
@@ -43,7 +68,14 @@ export const ReviewWindow: React.FC = () => {
             id: proposal.id,
             status: 'rejected'
         });
+
+        // Detach model before unmounting to prevent Monaco race condition
+        if (editorRef.current) {
+            editorRef.current.setModel(null);
+        }
+
         setProposal(null);
+        editorRef.current = null; 
     };
 
     if (!proposal) return null;
@@ -78,20 +110,19 @@ export const ReviewWindow: React.FC = () => {
                 {/* Diff Editor */}
                 <div className="flex-1 relative">
                     <DiffEditor
+                        key={proposal.id} 
                         original={proposal.original}
                         modified={modifiedContent}
+                        theme="vs-dark"
                         onMount={(editor) => {
-                            // Update state when user edits the 'modified' side
-                            editor.getModifiedEditor().onDidChangeModelContent(() => {
-                                setModifiedContent(editor.getModifiedEditor().getValue());
-                            });
+                            editorRef.current = editor;
                         }}
                         options={{
                             renderSideBySide: true,
-                            theme: 'vs-dark',
                             originalEditable: false,
-                            readOnly: false, // Right side is editable!
-                            minimap: { enabled: false }
+                            readOnly: false,
+                            minimap: { enabled: false },
+                            automaticLayout: true
                         }}
                     />
                 </div>

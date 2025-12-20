@@ -17,16 +17,15 @@ new string to replace it with
 
 ### INSTRUCTIONS
 1. Analyze the 'Plan' and 'Original Request'.
-2. If you need to check existing code, use <read_file>.
-3. For NEW files, use <write_file>.
-4. For EXISTING files, use <replace>. 
+2. **ATOMICY:** Aim for small, incremental changes. Do not try to rewrite whole files if a <replace> will suffice.
+3. If you need to check existing code, use <read_file>.
+4. For NEW files, use <write_file>.
+5. For EXISTING files, use <replace>. 
    - **CRITICAL:** The <old> block must match the file content EXACTLY (including whitespace).
    - **TIP:** Do NOT include long blocks of code or comments in <old>. Use the smallest unique snippet possible (3-5 lines) to anchor your change.
-   - **BAD:** Including 20 lines of context.
-   - **GOOD:** Including the function signature and the first line of the body.
-5. You can execute multiple tools in one response.
-6. Return the code inside the tool tags.
-7. If the plan is done, output a brief confirmation.
+6. **PROGRESS TRACKING:** When you finish a specific task from the plan, append **[COMPLETED: Task ID]** to your response.
+7. You can execute multiple tools in one response, but keep the total output length reasonable to ensure smooth streaming.
+8. If the plan is done, output a brief confirmation.
 `;
 
 export const QA_PROMPT = `
