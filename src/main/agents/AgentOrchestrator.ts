@@ -86,6 +86,14 @@ export class AgentOrchestrator {
             break;
         }
 
+        // --- PROPOSITION A: Hard Termination Gate ---
+        // If we have tasks and ALL of them are completed, force FINISH.
+        if (this.currentTasks.length > 0 && this.currentTasks.every(t => t.status === 'completed')) {
+            finalContent += `\n\n### ✅ All tasks completed. Finishing workflow.`;
+            this.emitContent(finalContent);
+            nextAgent = 'FINISH';
+        }
+
         loopCount++;
 
         if (nextAgent === 'FINISH') {
@@ -170,103 +178,285 @@ export class AgentOrchestrator {
 
                 if (signal.aborted) break;
 
-                // --- 3. Post-Process Agent Output ---
-                let uiFriendlyOutput = agentOutput;
+                                // --- 3. Post-Process Agent Output ---
+
+                                let uiFriendlyOutput = agentOutput;
+
+                                
+
+                                // --- PROPOSITION B: Auto-update tasks from agent tags ---
+
+                                const completionMatch = agentOutput.match(/\[COMPLETED:\s*(Task\s*\d+)\]/gi);
+
+                                if (completionMatch) {
+
+                                    completionMatch.forEach(tag => {
+
+                                        const taskId = tag.match(/Task\s*\d+/i)?.[0];
+
+                                        if (taskId) {
+
+                                            const task = this.currentTasks.find(t => t.id.toLowerCase().includes(taskId.toLowerCase()));
+
+                                            if (task && task.status !== 'completed') {
+
+                                                task.status = 'completed';
+
+                                                finalContent += `\n\n[System: Agent marked ${taskId} as completed]`;
+
+                                            }
+
+                                        }
+
+                                    });
+
+                                }
+
                 
-                // PARSE CHECKLIST if Planner
-                if (nextAgent === 'Planner') {
-                    this.parseChecklist(agentOutput);
-                }
 
-                if (['Analyser', 'QA', 'Reviewer'].includes(nextAgent)) {
-                    try {
-                        const cleanJson = agentOutput.replace(/```json/g, '').replace(/```/g, '').trim();
-                        const parsed = JSON.parse(cleanJson);
-                        
-                        if (nextAgent === 'Analyser') {
-                            uiFriendlyOutput = `**Summary:** ${parsed.summary}\n\n**Subsystems:** ${parsed.domains.join(', ')}\n\n**Risks:**\n${parsed.risks.map((r:string) => `- ${r}`).join('\n')}`;
-                        } else if (nextAgent === 'QA') {
-                            uiFriendlyOutput = `**QA Status:** ${parsed.status === 'PASS' ? '✅ PASS' : '❌ FAIL'}\n\n**Defects:**\n${parsed.defects.map((d:any) => `- [${d.severity}] ${d.description} (${d.location})`).join('\n')}`;
-                        } else if (nextAgent === 'Reviewer') {
-                            uiFriendlyOutput = `**Review Status:** ${parsed.status === 'APPROVED' ? '✅ APPROVED' : '❌ REJECTED'}\n\n**Comments:**\n${parsed.comments.map((c:string) => `- ${c}`).join('\n')}`;
-                        }
-                    } catch (e) {}
-                }
+                                // PARSE CHECKLIST if Planner
 
-                // --- 4. Tool Execution (for Coder) ---
-                if (nextAgent === 'Coder') {
-                    if (signal.aborted) break;
-                    const toolResult = await this.tools.executeTools(agentOutput, autoApply);
-                    if (toolResult) {
-                        const toolMsg = `\n\n[System Tool Output]:\n${toolResult.userOutput}`;
-                        uiFriendlyOutput += toolMsg;
-                        this.emitContent(finalContent + turnHeader + uiFriendlyOutput);
-                        currentHistory += `\n\n### ${nextAgent} Output:\n${agentOutput}\n\n### Tool Result:\n${toolResult.llmOutput}`;
-                    } else {
-                         currentHistory += `\n\n### ${nextAgent} Output:\n${agentOutput}`;
-                    }
+                                if (nextAgent === 'Planner') {
 
-                    // --- VERIFICATION GATE ---
-                    if (!autoMarkTasks && this.currentTasks.some(t => t.status === 'pending')) {
-                        if (signal.aborted) break;
-                        const pendingTask = this.currentTasks.find(t => t.status === 'pending');
-                        if (pendingTask) {
-                            const result = await this.proposalManager.requestTaskConfirmation(pendingTask.description);
-                            if (result.status === 'confirmed') {
-                                pendingTask.status = 'completed';
-                                finalContent += `\n\n✅ **User confirmed completion of:** ${pendingTask.description}`;
-                                currentHistory += `\n\n[SYSTEM]: User confirmed that the task "${pendingTask.description}" is completed.`;
-                            } else {
-                                pendingTask.status = 'rejected';
-                                finalContent += `\n\n❌ **User REJECTED completion of:** ${pendingTask.description}\n**Reason:** ${result.comment}`;
-                                currentHistory += `\n\n[SYSTEM]: User REJECTED that the task "${pendingTask.description}" is completed. User Comment: ${result.comment}. Please address the issue.`;
+                                    this.parseChecklist(agentOutput);
+
+                                }
+
+                                if (['Analyser', 'QA', 'Reviewer'].includes(nextAgent)) {
+
+                                    try {
+
+                                        const cleanJson = agentOutput.replace(/```json/g, '').replace(/```/g, '').trim();
+
+                                        const parsed = JSON.parse(cleanJson);
+
+                                        
+
+                                        if (nextAgent === 'Analyser') {
+
+                                            uiFriendlyOutput = `**Summary:** ${parsed.summary}\n\n**Subsystems:** ${parsed.domains.join(', ')}\n\n**Risks:**\n${parsed.risks.map((r:string) => `- ${r}`).join('\n')}`;
+
+                                        } else if (nextAgent === 'QA') {
+
+                                            uiFriendlyOutput = `**QA Status:** ${parsed.status === 'PASS' ? '✅ PASS' : '❌ FAIL'}\n\n**Defects:**\n${parsed.defects.map((d:any) => `- [${d.severity}] ${d.description} (${d.location})`).join('\n')}`;
+
+                                        } else if (nextAgent === 'Reviewer') {
+
+                                            uiFriendlyOutput = `**Review Status:** ${parsed.status === 'APPROVED' ? '✅ APPROVED' : '❌ REJECTED'}\n\n**Comments:**\n${parsed.comments.map((c:string) => `- ${c}`).join('\n')}`;
+
+                                        }
+
+                                    } catch (e) {}
+
+                                }
+
+                
+
+                                // --- 4. Tool Execution (for Coder) ---
+
+                                if (nextAgent === 'Coder') {
+
+                                    if (signal.aborted) break;
+
+                                    const toolResult = await this.tools.executeTools(agentOutput, autoApply);
+
+                                    if (toolResult) {
+
+                                        const toolMsg = `\n\n[System Tool Output]:\n${toolResult.userOutput}`;
+
+                                        uiFriendlyOutput += toolMsg;
+
+                                        this.emitContent(finalContent + turnHeader + uiFriendlyOutput);
+
+                                        currentHistory += `\n\n### ${nextAgent} Output:\n${agentOutput}\n\n### Tool Result:\n${toolResult.llmOutput}`;
+
+                                        
+
+                                        // PROPOSITION B: Auto-mark the first pending task if autoMarkTasks is on
+
+                                        if (autoMarkTasks) {
+
+                                            const pendingTask = this.currentTasks.find(t => t.status === 'pending');
+
+                                            if (pendingTask) {
+
+                                                pendingTask.status = 'completed';
+
+                                                finalContent += `\n\n✅ **Auto-completed:** ${pendingTask.description}`;
+
+                                            }
+
+                                        }
+
+                                    } else {
+
+                                         currentHistory += `\n\n### ${nextAgent} Output:\n${agentOutput}`;
+
+                                    }
+
+                
+
+                                    // --- VERIFICATION GATE ---
+
+                                    if (!autoMarkTasks && this.currentTasks.some(t => t.status === 'pending')) {
+
+                                        if (signal.aborted) break;
+
+                                        const pendingTask = this.currentTasks.find(t => t.status === 'pending');
+
+                                        if (pendingTask) {
+
+                                            const result = await this.proposalManager.requestTaskConfirmation(pendingTask.description);
+
+                                            if (result.status === 'confirmed') {
+
+                                                pendingTask.status = 'completed';
+
+                                                finalContent += `\n\n✅ **User confirmed completion of:** ${pendingTask.description}`;
+
+                                                currentHistory += `\n\n[SYSTEM]: User confirmed that the task "${pendingTask.description}" is completed.`;
+
+                                            } else {
+
+                                                pendingTask.status = 'rejected';
+
+                                                finalContent += `\n\n❌ **User REJECTED completion of:** ${pendingTask.description}\n**Reason:** ${result.comment}`;
+
+                                                currentHistory += `\n\n[SYSTEM]: User REJECTED that the task "${pendingTask.description}" is completed. User Comment: ${result.comment}. Please address the issue.`;
+
+                                            }
+
+                                            this.emitContent(finalContent);
+
+                                        }
+
+                                    }
+
+                                } else {
+
+                                    currentHistory += `\n\n### ${nextAgent} Output:\n${agentOutput}`;
+
+                                }
+
+                                
+
+                                steps.push({ agent: nextAgent, input: '...', output: agentOutput });
+
+                                this.emitSteps(steps);
+
+                
+
+                                finalContent += turnHeader + uiFriendlyOutput;
+
+                                this.emitContent(finalContent);
+
+                
+
+                                nextAgent = 'Router';
+
+                
+
+                            } catch (err: any) {
+
+                                 if (err.message === 'Aborted by user') break;
+
+                                 console.error(`Error in ${nextAgent}:`, err);
+
+                                 finalContent += `\n[Error executing ${nextAgent}: ${err.message}]\n`;
+
+                                 this.emitContent(finalContent);
+
+                                 break;
+
                             }
-                            this.emitContent(finalContent);
+
                         }
+
                     }
-                } else {
-                    currentHistory += `\n\n### ${nextAgent} Output:\n${agentOutput}`;
-                }
+
+                    this.abortController = null;
+
+                    return {
+
+                        content: finalContent,
+
+                        steps: [] 
+
+                    };
+
+                  }
+
                 
-                steps.push({ agent: nextAgent, input: '...', output: agentOutput });
-                this.emitSteps(steps);
 
-                finalContent += turnHeader + uiFriendlyOutput;
-                this.emitContent(finalContent);
+                  private parseChecklist(text: string) {
 
-                nextAgent = 'Router';
+                      // Robust multi-format regex: matches "- [ ]", "1.", "- " followed by "Task X" or just text
 
-            } catch (err: any) {
-                 if (err.message === 'Aborted by user') break;
-                 console.error(`Error in ${nextAgent}:`, err);
-                 finalContent += `\n[Error executing ${nextAgent}: ${err.message}]\n`;
-                 this.emitContent(finalContent);
-                 break;
-            }
-        }
-    }
-    this.abortController = null;
-    return {
-        content: finalContent,
-        steps: [] 
-    };
-  }
+                      const strictRegex = /- \[ \] \*\*(Task \d+:)\*\* (.*?)(?:\*Verify by:\* (.*))?$/gm;
 
-  private parseChecklist(text: string) {
-      const regex = /- \[ \] \*\*(Task \d+:)\*\* (.*?)(?:\*Verify by:\* (.*))?$/gm;
-      let match;
-      const newTasks: ITask[] = [];
-      while ((match = regex.exec(text)) !== null) {
-          newTasks.push({
-              id: match[1],
-              description: match[2].trim(),
-              status: 'pending'
-          });
-      }
-      if (newTasks.length > 0) {
-          this.currentTasks = newTasks;
-      }
-  }
+                      const looseRegex = /^(?:-|
+
+                \d+\.)\s*(?:\s*\]\s*)?(?:\*\*)?(Task\s*\d+:)?(?:\*\*)?\s*(.*?)$/gm;
+
+                      
+
+                      let match;
+
+                      const newTasks: ITask[] = [];
+
+                      
+
+                      // Try strict first
+
+                      while ((match = strictRegex.exec(text)) !== null) {
+
+                          newTasks.push({
+
+                              id: match[1].replace(':', ''),
+
+                              description: match[2].trim(),
+
+                              status: 'pending'
+
+                          });
+
+                      }
+
+                
+
+                      // If strict failed, try loose
+
+                      if (newTasks.length === 0) {
+
+                          while ((match = looseRegex.exec(text)) !== null) {
+
+                              if (match[2] && match[2].trim().length > 5) {
+
+                                  newTasks.push({
+
+                                      id: match[1] ? match[1].replace(':', '') : `Task ${newTasks.length + 1}`,
+
+                                      description: match[2].trim(),
+
+                                      status: 'pending'
+
+                                  });
+
+                              }
+
+                          }
+
+                      }
+
+                
+
+                      if (newTasks.length > 0) {
+
+                          this.currentTasks = newTasks;
+
+                      }
+
+                  }
 
   // Helper to flatten context
   private formatContext(context: any): string {
