@@ -169,15 +169,35 @@ export const useFileStore = create<FileState>((set, get) => ({
 
   togglePinTab: (id: string) => {
       set((state) => {
-          const updatedTabs = state.tabs.map(t => t.id === id ? { ...t, isPinned: !t.isPinned } : t);
-          // Sort logic: Pinned items move to start? 
-          // Implementation: We keep array order but UI renders pinned first? 
-          // Or we actually sort the array. Sorting array is cleaner for DnD.
-          updatedTabs.sort((a, b) => {
-              if (a.isPinned === b.isPinned) return 0; // Maintain relative order
-              return a.isPinned ? -1 : 1;
-          });
-          return { tabs: updatedTabs };
+          const tabIndex = state.tabs.findIndex(t => t.id === id);
+          if (tabIndex === -1) return state;
+
+          const tab = state.tabs[tabIndex];
+          const isPinning = !tab.isPinned;
+          
+          // Remove tab from current position
+          const newTabs = [...state.tabs];
+          newTabs.splice(tabIndex, 1);
+
+          // Calculate insert index
+          let insertIndex = 0;
+          const pinnedCount = newTabs.filter(t => t.isPinned).length;
+
+          if (isPinning) {
+              // Pinning: Add to end of pinned list (FIFO for pinning)
+              insertIndex = pinnedCount; 
+          } else {
+              // Unpinning: Add to start of unpinned list (after all pinned tabs)
+              insertIndex = pinnedCount;
+          }
+
+          // Create updated tab
+          const updatedTab = { ...tab, isPinned: isPinning };
+          
+          // Insert
+          newTabs.splice(insertIndex, 0, updatedTab);
+
+          return { tabs: newTabs };
       });
   },
 
@@ -189,9 +209,25 @@ export const useFileStore = create<FileState>((set, get) => ({
 
   reorderTabs: (sourceIndex: number, destIndex: number) => {
       set((state) => {
+          if (sourceIndex === destIndex) return state;
+
           const newTabs = [...state.tabs];
           const [moved] = newTabs.splice(sourceIndex, 1);
           newTabs.splice(destIndex, 0, moved);
+
+          // Validate Zone Integrity
+          // Ensure no Pinned tabs appear after Unpinned tabs
+          let seenUnpinned = false;
+          for (const tab of newTabs) {
+              if (!tab.isPinned) {
+                  seenUnpinned = true;
+              } else if (seenUnpinned) {
+                  // Found a Pinned tab AFTER an Unpinned one -> Invalid move.
+                  // Revert the operation by returning original state
+                  return state; 
+              }
+          }
+
           return { tabs: newTabs };
       });
   }
