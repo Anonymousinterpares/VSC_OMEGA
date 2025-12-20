@@ -80,6 +80,12 @@ export class AgentOrchestrator {
     this.mainWindow.webContents.send(CHANNELS.TO_RENDERER.AGENT_TOKEN_UPDATE, displayStats);
   }
 
+  private emitPlan() {
+    if (this.mainWindow) {
+      this.mainWindow.webContents.send(CHANNELS.TO_RENDERER.AGENT_PLAN_UPDATE, this.currentTasks);
+    }
+  }
+
   private updateStats(usage: any, agent: string) {
       if (!usage) return;
       
@@ -216,6 +222,11 @@ export class AgentOrchestrator {
 
       loopCount++;
 
+      // PRIORITY: If any task awaits review, force Reviewer
+      if (this.currentTasks.some(t => t.status === 'review_pending') && nextAgent === 'Router') {
+          nextAgent = 'Reviewer';
+      }
+
       if (nextAgent === 'FINISH') break;
 
       if (nextAgent === 'Router') {
@@ -331,55 +342,88 @@ export class AgentOrchestrator {
 
           if (signal.aborted) break;
 
-          // Check for task completion tags
-          const completionMatch = agentOutput.match(/ \[COMPLETED:\s*(Task\s*\d+)\]/gi);
-          if (completionMatch) {
-            completionMatch.forEach(tag => {
-              const taskIdMatch = tag.match(/Task\s*\d+/i);
-              if (taskIdMatch) {
-                const taskId = taskIdMatch[0];
-                const task = this.currentTasks.find(t => t.id.toLowerCase().includes(taskId.toLowerCase()));
-                if (task && task.status !== 'completed') {
-                  task.status = 'completed';
-                  const msg = `\n\n[System: Agent marked ${taskId} as completed]`
-                  finalContent += msg;
-                  this.emitDelta(msg);
-                }
+          // --- TASK STATUS PARSING ---
+          const completedMatch = agentOutput.match(/\[COMPLETED:\s*(?:Task\s*)?(\d+)\]/gi);
+          const verifiedMatch = agentOutput.match(/\[VERIFIED:\s*(?:Task\s*)?(\d+)\]/gi);
+          const rejectedMatch = agentOutput.match(/\[REJECTED:\s*(?:Task\s*)?(\d+)\]/gi);
+
+          if (completedMatch) {
+              completedMatch.forEach(tag => {
+                  const idMatch = tag.match(/\d+/);
+                  if (idMatch) {
+                      const task = this.currentTasks.find(t => t.id === idMatch[0] || t.id === `Task ${idMatch[0]}`);
+                      if (task && task.status !== 'completed') {
+                          if (autoMarkTasks) {
+                              task.status = 'completed';
+                              const msg = `\n\n[System: Auto-marked Task ${task.id} as COMPLETED]`;
+                              finalContent += msg;
+                              this.emitDelta(msg);
+                          } else {
+                              task.status = 'review_pending';
+                              const msg = `\n\n[System: Task ${task.id} marked for REVIEW]`;
+                              finalContent += msg;
+                              this.emitDelta(msg);
+                          }
+                          this.emitPlan();
+                      }
+                  }
+              });
+          }
+
+          if (verifiedMatch) {
+              for (const tag of verifiedMatch) {
+                  const idMatch = tag.match(/\d+/);
+                  if (idMatch) {
+                      const task = this.currentTasks.find(t => t.id === idMatch[0] || t.id === `Task ${idMatch[0]}`);
+                      if (task && (task.status === 'review_pending' || task.status === 'in_progress')) {
+                          if (autoMarkTasks) {
+                              task.status = 'completed';
+                              const msg = `\n\n✅ [System: Task ${task.id} VERIFIED and COMPLETED]`;
+                              finalContent += msg;
+                              this.emitDelta(msg);
+                          } else {
+                              if (signal.aborted) break;
+                              const result = await this.proposalManager.requestTaskConfirmation(task.description);
+                              if (result.status === 'confirmed') {
+                                  task.status = 'completed';
+                                  const msg = `\n\n✅ [System: User confirmed Task ${task.id}]`;
+                                  finalContent += msg;
+                                  this.emitDelta(msg);
+                              } else {
+                                  task.status = 'in_progress';
+                                  const msg = `\n\n❌ [System: User rejected Task ${task.id}: ${result.comment}]`;
+                                  finalContent += msg;
+                                  this.emitDelta(msg);
+                                  currentHistory += `\n[User Rejection]: Task ${task.id} was rejected. Reason: ${result.comment}`;
+                              }
+                          }
+                          this.emitPlan();
+                      }
+                  }
               }
-            });
+          }
+
+          if (rejectedMatch) {
+              rejectedMatch.forEach(tag => {
+                  const idMatch = tag.match(/\d+/);
+                  if (idMatch) {
+                      const task = this.currentTasks.find(t => t.id === idMatch[0] || t.id === `Task ${idMatch[0]}`);
+                      if (task) {
+                          task.status = 'in_progress';
+                          const msg = `\n\n❌ [System: Task ${task.id} REJECTED by Reviewer]`;
+                          finalContent += msg;
+                          this.emitDelta(msg);
+                          this.emitPlan();
+                      }
+                  }
+              });
           }
 
           if (nextAgent === 'Planner') {
             this.parseChecklist(agentOutput);
           }
 
-          if (nextAgent === 'Coder') {
-            // Streaming execution handles most tools.
-            // We use executeTools only for any leftover search or unparsed blocks.
-            // For now, we assume streaming covered it to avoid duplication.
-            
-            // User verification gate if autoMarkTasks is off
-            if (!autoMarkTasks && this.currentTasks.some(t => t.status === 'pending')) {
-              if (signal.aborted) break;
-              const pendingTask = this.currentTasks.find(t => t.status === 'pending');
-              if (pendingTask) {
-                const result = await this.proposalManager.requestTaskConfirmation(pendingTask.description);
-                if (result.status === 'confirmed') {
-                  pendingTask.status = 'completed';
-                  const msg = `\n\n✅ **User confirmed completion of:** ${pendingTask.description}`;
-                  finalContent += msg;
-                  currentHistory += `\n\n[SYSTEM]: User confirmed that the task "${pendingTask.description}" is completed.`;
-                  this.emitDelta(msg);
-                } else {
-                  pendingTask.status = 'rejected';
-                  const msg = `\n\n❌ **User REJECTED completion of:** ${pendingTask.description}\n**Reason:** ${result.comment}`;
-                  finalContent += msg;
-                  currentHistory += `\n\n[SYSTEM]: User REJECTED that the task "${pendingTask.description}" is completed. User Comment: ${result.comment}. Please address the issue.`;
-                  this.emitDelta(msg);
-                }
-              }
-            }
-          } else {
+          if (nextAgent !== 'Coder') {
             currentHistory += `\n\n### ${nextAgent} Output:\n${agentOutput}`;
           }
 
@@ -435,7 +479,17 @@ export class AgentOrchestrator {
     }
 
     if (newTasks.length > 0) {
-      this.currentTasks = newTasks;
+      // Merge with existing tasks to preserve status if ID exists
+      if (this.currentTasks.length > 0) {
+          const merged = newTasks.map(newTask => {
+              const existing = this.currentTasks.find(t => t.id === newTask.id || t.description === newTask.description);
+              return existing ? { ...newTask, status: existing.status } : newTask;
+          });
+          this.currentTasks = merged;
+      } else {
+          this.currentTasks = newTasks;
+      }
+      this.emitPlan();
     }
   }
 

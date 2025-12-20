@@ -29,6 +29,7 @@ export const CHANNELS = {
         REFRESH_TREE: 'file:refresh-tree',
         PROPOSE_CHANGE: 'proposal:change',
         REQUEST_TASK_CONFIRMATION: 'proposal:task-confirmation',
-        DIRTY_CHECK_REQUEST: 'app:dirty-check-request'
+        DIRTY_CHECK_REQUEST: 'app:dirty-check-request',
+        AGENT_PLAN_UPDATE: 'agent:plan-update'
     }
 };

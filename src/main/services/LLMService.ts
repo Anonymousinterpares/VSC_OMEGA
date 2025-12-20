@@ -86,9 +86,13 @@ export class LLMService {
         let timeoutId: NodeJS.Timeout | null = null;
         
         while (true) {
+            if (signal?.aborted) {
+                throw new Error("Aborted by user");
+            }
+
             // Race between next chunk and silence timeout
             const chunkPromise = streamIterator.next();
-            const timeoutPromise = new Promise<{ done: boolean, value: undefined }>((resolve) => {
+            const timeoutPromise = new Promise<IteratorResult<any>>((resolve) => {
                 timeoutId = setTimeout(() => {
                     console.log("[LLMService] Stream silence timeout (15s). Assuming completion.");
                     resolve({ done: true, value: undefined });
@@ -99,13 +103,13 @@ export class LLMService {
             
             if (timeoutId) clearTimeout(timeoutId);
 
-            if (done) break;
+            if (done || !value) break;
 
             const chunk = value;
             if (chunk.usageMetadata && onUsage) {
                 onUsage(chunk.usageMetadata);
             }
-            const chunkText = chunk.text();
+            const chunkText = typeof chunk.text === 'function' ? chunk.text() : "";
             yield chunkText;
         }
     } catch (error: any) {

@@ -42,7 +42,9 @@ export interface IFileNode {
 export interface ITask {
     id: string;
     description: string;
-    status: 'pending' | 'completed' | 'rejected';
+    status: 'pending' | 'in_progress' | 'review_pending' | 'completed' | 'rejected' | 'failed';
+    assignedAgent?: string;
+    verificationCmd?: string;
 }
 
 export interface IAppSettings {

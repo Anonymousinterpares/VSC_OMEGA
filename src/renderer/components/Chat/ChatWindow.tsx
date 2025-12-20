@@ -6,6 +6,8 @@ import { useFileStore } from '../../store/useFileStore';
 import { useContextStore } from '../../store/useContextStore';
 import { IAgentMessage } from '@/shared/types';
 import { TaskVerification } from './TaskVerification';
+import { MissionStatus } from './MissionStatus';
+import { useTaskStore } from '../../store/useTaskStore';
 
 interface ITokenStats {
     totalInput: number;
@@ -285,7 +287,10 @@ export const ChatWindow: React.FC = () => {
   const [isThinking, setIsThinking] = useState(false);
   const [currentAgent, setCurrentAgent] = useState<string | null>(null);
   const [autoApply, setAutoApply] = useState(true);
-  const [autoMarkTasks, setAutoMarkTasks] = useState(false);
+  
+  const { strictMode, setStrictMode, setTasks } = useTaskStore();
+  const autoMarkTasks = !strictMode;
+  const setAutoMarkTasks = (val: boolean) => setStrictMode(!val);
   
   // Stats State
   const [tokenStats, setTokenStats] = useState<ITokenStats>({
@@ -351,11 +356,16 @@ export const ChatWindow: React.FC = () => {
             setTokenStats(stats);
         });
 
+        const removePlanListener = window.electron.ipcRenderer.on(CHANNELS.TO_RENDERER.AGENT_PLAN_UPDATE, (tasks: any[]) => {
+            setTasks(tasks);
+        });
+
           return () => {
               removeStepListener();
               removeContentListener();
               removeStatusListener();
               removeTokenListener();
+              removePlanListener();
           };
       }
   }, []);
@@ -565,6 +575,8 @@ export const ChatWindow: React.FC = () => {
         {/* Verification Modal Inject */}
         <TaskVerification />
       </div>
+
+      <MissionStatus />
 
       {/* Input */}
       <div className="p-4 bg-gray-900 border-t border-gray-800">
