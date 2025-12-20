@@ -82,10 +82,26 @@ export class LLMService {
         const model = genAI.getGenerativeModel({ model: settings.selectedModel });
         const result = await model.generateContentStream(fullPrompt);
 
-        for await (const chunk of result.stream) {
-            if (signal?.aborted) {
-                throw new Error("Aborted by user");
-            }
+        const streamIterator = result.stream[Symbol.asyncIterator]();
+        let timeoutId: NodeJS.Timeout | null = null;
+        
+        while (true) {
+            // Race between next chunk and silence timeout
+            const chunkPromise = streamIterator.next();
+            const timeoutPromise = new Promise<{ done: boolean, value: undefined }>((resolve) => {
+                timeoutId = setTimeout(() => {
+                    console.log("[LLMService] Stream silence timeout (15s). Assuming completion.");
+                    resolve({ done: true, value: undefined });
+                }, 15000); // 15s silence timeout
+            });
+
+            const { done, value } = await Promise.race([chunkPromise, timeoutPromise]);
+            
+            if (timeoutId) clearTimeout(timeoutId);
+
+            if (done) break;
+
+            const chunk = value;
             if (chunk.usageMetadata && onUsage) {
                 onUsage(chunk.usageMetadata);
             }
