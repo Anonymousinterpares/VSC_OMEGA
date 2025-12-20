@@ -14,21 +14,27 @@ export class FileSystemService {
   }
 
   async handleOpenFolder() {
-    const { canceled, filePaths } = await dialog.showOpenDialog(this.mainWindow, {
-      properties: ['openDirectory']
-    });
+    console.log("Main: handleOpenFolder triggered");
+    try {
+        const { canceled, filePaths } = await dialog.showOpenDialog({
+          properties: ['openDirectory']
+        });
 
-    if (canceled || filePaths.length === 0) {
-      return;
+        if (canceled || filePaths.length === 0) {
+          return;
+        }
+
+        this.projectRoot = filePaths[0];
+        console.log("Main: Folder selected:", this.projectRoot);
+        const tree = await this.readDirectory(this.projectRoot);
+        
+        this.mainWindow.webContents.send(CHANNELS.TO_RENDERER.FOLDER_OPENED, {
+          rootPath: this.projectRoot,
+          tree
+        });
+    } catch (error) {
+        console.error("Main: Error in handleOpenFolder:", error);
     }
-
-    this.projectRoot = filePaths[0];
-    const tree = await this.readDirectory(this.projectRoot);
-    
-    this.mainWindow.webContents.send(CHANNELS.TO_RENDERER.FOLDER_OPENED, {
-      rootPath: this.projectRoot,
-      tree
-    });
   }
 
   async handleReadFile(filePath: string): Promise<string> {

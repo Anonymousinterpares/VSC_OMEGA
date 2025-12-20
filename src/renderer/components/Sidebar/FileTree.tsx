@@ -6,14 +6,22 @@ import clsx from 'clsx';
 
 const FileTreeNode: React.FC<{ node: IFileNode; depth?: number }> = ({ node, depth = 0 }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const { selectFile, selectedFile } = useFileStore();
+  const { openFile, selectedFile } = useFileStore(); // Changed selectFile to openFile
 
-  const handleClick = () => {
+  const handleClick = (e: React.MouseEvent) => {
     if (node.type === 'folder') {
       setIsOpen(!isOpen);
     } else {
-      selectFile(node.path);
+      // Single Click -> Preview
+      openFile(node.path, true);
     }
+  };
+
+  const handleDoubleClick = (e: React.MouseEvent) => {
+      if (node.type !== 'folder') {
+          // Double Click -> Permanent
+          openFile(node.path, false);
+      }
   };
 
   const isSelected = selectedFile === node.path;
@@ -27,6 +35,7 @@ const FileTreeNode: React.FC<{ node: IFileNode; depth?: number }> = ({ node, dep
         )}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
         onClick={handleClick}
+        onDoubleClick={handleDoubleClick}
       >
         <span className="mr-1 text-gray-500">
           {node.type === 'folder' ? (
@@ -62,7 +71,10 @@ export const FileTree: React.FC = () => {
       <div className="flex flex-col items-center justify-center h-full text-gray-400 p-4 text-center">
         <p className="mb-4">No folder opened.</p>
         <button 
-            onClick={openFolder}
+            onClick={() => {
+                console.log("Renderer: Open Folder clicked");
+                openFolder();
+            }}
             className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded text-sm"
         >
             Open Folder

@@ -7,12 +7,13 @@ import { SettingsModal } from './components/Modals/SettingsModal';
 import { Sidebar } from './components/Sidebar/Sidebar';
 import { ChatWindow } from './components/Chat/ChatWindow';
 import { ReviewWindow } from './components/Modals/ReviewWindow';
+import { TabBar } from './components/Editor/TabBar';
 import Editor, { OnMount } from '@monaco-editor/react';
 import { CHANNELS } from '@/shared/constants';
 
 function App() {
   const { toggleModal } = useSettingsStore();
-  const { selectedFile, unsavedFiles, setUnsavedFile } = useFileStore(); // Updated Store
+  const { selectedFile, unsavedFiles, setUnsavedFile, activeTabId, closeTab, tabs } = useFileStore(); // Updated Store
   const { addContextItem } = useContextStore();
   const { highlightTarget, setHighlightTarget } = useSearchStore();
   
@@ -28,6 +29,7 @@ function App() {
   // Load File (Disk OR Unsaved Memory)
   useEffect(() => {
     const loadFile = async () => {
+      // Logic relies on 'selectedFile' which is now driven by 'activeTabId' in the store
       if (selectedFile && window.electron) {
         // Check if we have an unsaved version in memory
         if (unsavedFiles.has(selectedFile)) {
@@ -38,15 +40,16 @@ function App() {
         try {
             const content = await window.electron.ipcRenderer.invoke(CHANNELS.TO_MAIN.READ_FILE, selectedFile);
             setFileContent(content);
-            // setIsDirty(false); 
         } catch (error) {
             console.error("Failed to read file:", error);
             setFileContent("// Error reading file");
         }
+      } else if (!selectedFile) {
+          setFileContent("// Welcome to The Hive");
       }
     };
     loadFile();
-  }, [selectedFile]); // Do NOT depend on unsavedFiles here to avoid loops
+  }, [selectedFile]); // React to selectedFile changes (which happen when activeTab changes)
 
   // Handle Search Highlight
   useEffect(() => {
@@ -205,19 +208,16 @@ function App() {
       if (window.electron) {
           window.electron.ipcRenderer.invoke(CHANNELS.TO_MAIN.GET_BACKUPS).then((backups: string[]) => {
               if (backups.length > 0) {
-                  // Simply inform user or restore. 
-                  // For a "popup", we can use a simple confirm or a custom modal.
-                  // Using native confirm for simplicity in this iteration as requested "popup"
                   const message = `Recovered ${backups.length} unsaved files from a previous session:\n\n${backups.map(p => p.split(/[/\\]/).pop()).join('\n')}\n\nDo you want to restore them to your workspace? (Cancel will delete backups)`;
                   if (confirm(message)) {
                        // Restore logic: Load backups into unsavedFiles store
                        backups.forEach(async (path) => {
-                           // We need to read the backup content. 
-                           // We can use a new channel RESTORE_BACKUP to get content without overwriting disk file
                            try {
                                const content = await window.electron.ipcRenderer.invoke(CHANNELS.TO_MAIN.RESTORE_BACKUP, path);
                                if (content !== null) {
                                    setUnsavedFile(path, content);
+                                   // Also open the file if it's the first one
+                                   useFileStore.getState().openFile(path, false);
                                }
                            } catch (e) {
                                console.error(`Failed to restore backup for ${path}`, e);
@@ -246,28 +246,34 @@ function App() {
 
       {/* CENTER: Editor */}
       <div className="flex-1 flex flex-col bg-[#1e1e1e] min-w-0">
-         {/* Tabs (Placeholder) */}
-         <div className="h-9 bg-[#2d2d2d] flex items-center px-4 border-b border-black/20 text-sm text-gray-300">
-            <span>
-                {selectedFile ? selectedFile.replace(/\\/g, '/').split('/').pop() : 'Welcome'}
-                {isDirty && <span className="ml-2 text-white font-bold">*</span>}
-            </span>
-         </div>
+         {/* Tabs Bar */}
+         <TabBar />
+         
+         {/* Editor Area */}
          <div className="flex-1 relative">
-            <Editor 
-                height="100%" 
-                defaultLanguage="typescript" 
-                theme="vs-dark"
-                value={fileContent}
-                onChange={handleFileChange}
-                onMount={handleEditorDidMount}
-                options={{
-                    minimap: { enabled: false },
-                    fontSize: 14,
-                    padding: { top: 16 },
-                    readOnly: false
-                }}
-            />
+            {selectedFile ? (
+                <Editor 
+                    height="100%" 
+                    defaultLanguage="typescript" 
+                    theme="vs-dark"
+                    value={fileContent}
+                    onChange={handleFileChange}
+                    onMount={handleEditorDidMount}
+                    options={{
+                        minimap: { enabled: false },
+                        fontSize: 14,
+                        padding: { top: 16 },
+                        readOnly: false
+                    }}
+                />
+            ) : (
+                <div className="h-full flex items-center justify-center text-gray-600 select-none">
+                    <div className="text-center">
+                        <p className="text-xl font-semibold mb-2">The Hive</p>
+                        <p className="text-sm">Select a file to start editing</p>
+                    </div>
+                </div>
+            )}
          </div>
       </div>
 
