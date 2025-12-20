@@ -15,12 +15,14 @@ export const CHANNELS = {
     SAVE_SETTINGS: 'save-settings',
     TASK_CONFIRMATION_DECISION: 'task-confirmation-decision',
     ABORT_WORKFLOW: 'abort-workflow',
-    CHECK_SYNTAX: 'check-syntax'
+    CHECK_SYNTAX: 'check-syntax',
+    COMPRESS_CONTEXT: 'compress-context'
   },
     TO_RENDERER: {
         AGENT_STEP_UPDATE: 'agent:step-update',
         AGENT_CONTENT_UPDATE: 'agent:content-update',
         AGENT_STATUS_UPDATE: 'agent:status-update',
+        AGENT_TOKEN_UPDATE: 'agent:token-update',
         FOLDER_OPENED: 'file:folder-opened',
         FILE_READ: 'file:read',
         FILE_UPDATED: 'file:updated',

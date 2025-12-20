@@ -7,6 +7,87 @@ import { useContextStore } from '../../store/useContextStore';
 import { IAgentMessage } from '@/shared/types';
 import { TaskVerification } from './TaskVerification';
 
+interface ITokenStats {
+    totalInput: number;
+    totalOutput: number;
+    currentContextSize: number;
+    agentStats: Record<string, { input: number; output: number; contextSize: number }>;
+}
+
+const TokenStatsHeader: React.FC<{ stats: ITokenStats, onCompress: () => void, isCompressing: boolean }> = ({ stats, onCompress, isCompressing }) => {
+    const [expanded, setExpanded] = useState(false);
+
+    const formatNum = (n: number) => {
+        if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+        return n.toString();
+    };
+
+    return (
+        <div className="bg-gray-900 border-b border-gray-800 p-2 text-xs font-mono select-none">
+            <div className="flex justify-between items-center text-gray-400">
+                <div className="flex space-x-4 cursor-pointer" onClick={() => setExpanded(!expanded)} title="Click to view details">
+                    <span>In: <span className="text-blue-400">{formatNum(stats.totalInput)}</span></span>
+                    <span>Out: <span className="text-green-400">{formatNum(stats.totalOutput)}</span></span>
+                    <span>Ctx: <span className="text-yellow-400">{formatNum(stats.currentContextSize)}</span></span>
+                </div>
+                <button onClick={() => setExpanded(!expanded)} className="hover:text-white p-1">
+                    {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                </button>
+            </div>
+            
+            {expanded && (
+                <div className="mt-2 pt-2 border-t border-gray-700 animate-in slide-in-from-top-2 duration-200">
+                    <table className="w-full text-left mb-3 text-[10px] text-gray-500">
+                        <thead>
+                            <tr className="border-b border-gray-700 text-gray-400">
+                                <th className="pb-1 font-normal">Agent</th>
+                                <th className="pb-1 font-normal">In</th>
+                                <th className="pb-1 font-normal">Out</th>
+                                <th className="pb-1 font-normal">Ctx</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {Object.entries(stats.agentStats).length === 0 ? (
+                                <tr><td colSpan={4} className="py-2 text-center italic opacity-50">No data yet</td></tr>
+                            ) : (
+                                Object.entries(stats.agentStats).map(([agent, s]) => (
+                                    <tr key={agent} className="border-b border-gray-800/50 last:border-0">
+                                        <td className="py-1 text-gray-300">{agent}</td>
+                                        <td className="py-1">{formatNum(s.input)}</td>
+                                        <td className="py-1">{formatNum(s.output)}</td>
+                                        <td className="py-1">{formatNum(s.contextSize)}</td>
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+                    
+                    <button 
+                        onClick={onCompress} 
+                        disabled={isCompressing}
+                        className="w-full py-1.5 bg-blue-900/20 hover:bg-blue-900/40 text-blue-300 border border-blue-900/50 rounded flex items-center justify-center space-x-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed group"
+                    >
+                       {isCompressing ? (
+                           <>
+                             <RefreshCw size={12} className="animate-spin" />
+                             <span>Compressing Context...</span>
+                           </>
+                       ) : (
+                           <>
+                             <Layers size={12} className="group-hover:text-white transition-colors" />
+                             <span className="group-hover:text-white transition-colors">Compress Context</span>
+                           </>
+                       )}
+                    </button>
+                    <div className="mt-1.5 text-[9px] text-gray-600 text-center">
+                        Summarizes older history to save tokens while preserving key details.
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
 // Helper component for collapsible sections with Retry
 const CollapsibleLog: React.FC<{ 
     title: string; 
@@ -49,7 +130,7 @@ const CollapsibleLog: React.FC<{
 // Parsed Message Renderer
 const FormattedMessage: React.FC<{ content: string }> = ({ content }) => {
   // Regex to split by tags.
-  const tagRegex = /<(thought|write_file|replace|read_file)(?: path="([^"]+)")?>([\s\S]*?)(?:<\/\1>|$)|--- Next Step: (.*?) ---|\[System Tool Output\]:([\s\S]*?)(?=\n\n|---|$)|\[System: Agent marked (.*?) as completed\]|✅ \*\*Auto-completed:\*\* (.*?)(?=\n|$)/g;
+  const tagRegex = /<(thought|write_file|replace|read_file)(?: path="([^"]+)")?>([\s\S]*?)(?:<\/\1>|$)|--- Next Step: (.*?) ---|\[System Tool Output\]:([\s\S]*?)(?=\n\n|---|$)|\x5BSystem: Agent marked (.*?) as completed\]|✅ \*\*Auto-completed:\*\* (.*?)(?=\n|$)/g;
 
   let lastIndex = 0;
   let match;
@@ -205,6 +286,16 @@ export const ChatWindow: React.FC = () => {
   const [currentAgent, setCurrentAgent] = useState<string | null>(null);
   const [autoApply, setAutoApply] = useState(true);
   const [autoMarkTasks, setAutoMarkTasks] = useState(false);
+  
+  // Stats State
+  const [tokenStats, setTokenStats] = useState<ITokenStats>({
+      totalInput: 0,
+      totalOutput: 0,
+      currentContextSize: 0,
+      agentStats: {}
+  });
+  const [isCompressing, setIsCompressing] = useState(false);
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const { settings } = useSettingsStore();
   const { fileTree } = useFileStore();
@@ -216,7 +307,7 @@ export const ChatWindow: React.FC = () => {
     }
   }, [messages]);
 
-  // Streaming Listener
+  // Streaming & Stats Listener
   useEffect(() => {
       if (window.electron) {
           const removeStepListener = window.electron.ipcRenderer.on(CHANNELS.TO_RENDERER.AGENT_STEP_UPDATE, (data: { steps: any[] }) => {
@@ -256,10 +347,15 @@ export const ChatWindow: React.FC = () => {
             setCurrentAgent(data.agent);
         });
 
+        const removeTokenListener = window.electron.ipcRenderer.on(CHANNELS.TO_RENDERER.AGENT_TOKEN_UPDATE, (stats: ITokenStats) => {
+            setTokenStats(stats);
+        });
+
           return () => {
               removeStepListener();
               removeContentListener();
               removeStatusListener();
+              removeTokenListener();
           };
       }
   }, []);
@@ -302,6 +398,22 @@ export const ChatWindow: React.FC = () => {
         setIsThinking(false);
         setCurrentAgent(null);
     }
+  };
+
+  const handleCompressContext = async () => {
+      if (!window.electron || isCompressing) return;
+      setIsCompressing(true);
+      try {
+          // Pass current messages to backend for compression
+          const newMessages = await window.electron.ipcRenderer.invoke(CHANNELS.TO_MAIN.COMPRESS_CONTEXT, messages);
+          if (newMessages) {
+              setMessages(newMessages);
+          }
+      } catch (err) {
+          console.error("Compression failed", err);
+      } finally {
+          setIsCompressing(false);
+      }
   };
 
   const handleSend = async () => {
@@ -412,12 +524,19 @@ export const ChatWindow: React.FC = () => {
             <span className="text-xs text-gray-500">{settings.selectedModel}</span>
         </div>
       </div>
+      
+      {/* Token Stats Bar */}
+      <TokenStatsHeader 
+          stats={tokenStats} 
+          onCompress={handleCompressContext}
+          isCompressing={isCompressing}
+      />
 
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.map((msg) => (
           <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[95%] rounded-lg p-3 ${
+            <div className={`max-w-[95%] rounded-lg p-3 ${ 
               msg.role === 'user' 
                 ? 'bg-blue-600 text-white' 
                 : msg.role === 'system'

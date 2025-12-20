@@ -8,7 +8,7 @@ export class LLMService {
     this.settingsService = settingsService;
   }
 
-  async generateCompletion(systemPrompt: string, userMessage: string, context: string): Promise<string> {
+  async generateCompletion(systemPrompt: string, userMessage: string, context: string, onUsage?: (usage: any) => void): Promise<string> {
     const settings = await this.settingsService.getSettings();
     
     if (!settings.geminiApiKey) {
@@ -46,6 +46,9 @@ export class LLMService {
             ]) as any;
 
             const response = await result.response;
+            if (result.response.usageMetadata && onUsage) {
+                onUsage(result.response.usageMetadata);
+            }
             return response.text();
         } catch (error: any) {
             attempts++;
@@ -55,7 +58,7 @@ export class LLMService {
     return "ERROR: Unknown error in LLMService.";
   }
 
-  async *generateCompletionStream(systemPrompt: string, userMessage: string, context: string, signal?: AbortSignal): AsyncGenerator<string, void, unknown> {
+  async *generateCompletionStream(systemPrompt: string, userMessage: string, context: string, signal?: AbortSignal, onUsage?: (usage: any) => void): AsyncGenerator<string, void, unknown> {
     const settings = await this.settingsService.getSettings();
     if (!settings.geminiApiKey) {
       yield "ERROR: No API Key provided.";
@@ -82,6 +85,9 @@ export class LLMService {
         for await (const chunk of result.stream) {
             if (signal?.aborted) {
                 throw new Error("Aborted by user");
+            }
+            if (chunk.usageMetadata && onUsage) {
+                onUsage(chunk.usageMetadata);
             }
             const chunkText = chunk.text();
             yield chunkText;

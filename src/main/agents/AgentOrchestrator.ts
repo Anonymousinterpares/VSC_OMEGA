@@ -28,6 +28,18 @@ export class AgentOrchestrator {
   private currentTasks: ITask[] = [];
   private proposalManager: ProposalManager;
   private abortController: AbortController | null = null;
+  private sessionStats = {
+    totalInput: 0,
+    totalOutput: 0,
+    currentContextSize: 0,
+    agentStats: {} as Record<string, { input: number; output: number; contextSize: number }>
+  };
+
+  private currentTurnStats = {
+    input: 0,
+    output: 0,
+    agent: ''
+  };
 
   constructor(llm: LLMService, fileSystem: FileSystemService, mainWindow: BrowserWindow | null, proposalManager: ProposalManager) {
     this.llm = llm;
@@ -41,6 +53,108 @@ export class AgentOrchestrator {
       this.abortController.abort();
       this.emitContent("\n\n[System: Workflow Stopped by User]\n");
     }
+  }
+
+  private emitStats() {
+    if (!this.mainWindow) return;
+
+    // Combine session + current
+    const displayStats = {
+        totalInput: this.sessionStats.totalInput + this.currentTurnStats.input,
+        totalOutput: this.sessionStats.totalOutput + (Math.round(this.currentTurnStats.output)),
+        currentContextSize: this.currentTurnStats.input || this.sessionStats.currentContextSize,
+        agentStats: { ...this.sessionStats.agentStats }
+    };
+
+    // Update the specific agent in the display stats
+    if (this.currentTurnStats.agent) {
+        const agent = this.currentTurnStats.agent;
+        const existing = displayStats.agentStats[agent] || { input: 0, output: 0, contextSize: 0 };
+        displayStats.agentStats[agent] = {
+            input: existing.input + this.currentTurnStats.input,
+            output: existing.output + Math.round(this.currentTurnStats.output),
+            contextSize: this.currentTurnStats.input || existing.contextSize
+        };
+    }
+
+    this.mainWindow.webContents.send(CHANNELS.TO_RENDERER.AGENT_TOKEN_UPDATE, displayStats);
+  }
+
+  private updateStats(usage: any, agent: string) {
+      if (!usage) return;
+      
+      // Overwrite current turn estimates with official data
+      this.currentTurnStats.input = usage.promptTokenCount || 0;
+      this.currentTurnStats.output = usage.candidatesTokenCount || 0;
+      this.currentTurnStats.agent = agent;
+
+      this.emitStats();
+  }
+
+  private commitTurn() {
+      const agent = this.currentTurnStats.agent;
+      if (!agent) return;
+
+      this.sessionStats.totalInput += this.currentTurnStats.input;
+      this.sessionStats.totalOutput += Math.round(this.currentTurnStats.output);
+      this.sessionStats.currentContextSize = this.currentTurnStats.input;
+
+      if (!this.sessionStats.agentStats[agent]) {
+          this.sessionStats.agentStats[agent] = { input: 0, output: 0, contextSize: 0 };
+      }
+      this.sessionStats.agentStats[agent].input += this.currentTurnStats.input;
+      this.sessionStats.agentStats[agent].output += Math.round(this.currentTurnStats.output);
+      this.sessionStats.agentStats[agent].contextSize = this.currentTurnStats.input;
+
+      // Reset current
+      this.currentTurnStats = { input: 0, output: 0, agent: '' };
+      this.emitStats();
+  }
+
+  public async compressHistory(messages: any[]): Promise<any[]> {
+      if (!messages || messages.length <= 6) return messages;
+
+      // Keep last 4 messages (plus the very first system message if it exists, but here we just take last 4)
+      // Actually, typically we keep the last few turns.
+      const KEEP_COUNT = 4;
+      const recentMessages = messages.slice(-KEEP_COUNT);
+      const olderMessages = messages.slice(0, -KEEP_COUNT);
+
+      // Format older messages for summarization
+      const historyText = olderMessages.map(m => `[${m.role} (${m.agentName || 'User'})]: ${m.content}`).join('\n\n');
+
+      const systemPrompt = "You are a Technical Project Manager. Your task is to compress the following chat history into a detailed, structured summary.";
+      const userPrompt = `
+      Analyze the conversation history below. 
+      Identify the key topics discussed, decisions made, and technical details established.
+      Produce a summary that preserves all critical technical context (file paths, bug fixes, user preferences, architectural decisions) but removes conversational fluff.
+      
+      Format the output as a set of topic blocks:
+      ### Topic: [Topic Name]
+      - [Chronological Detail 1]
+      - [Chronological Detail 2]
+      
+      HISTORY TO COMPRESS:
+      ${historyText}
+      `;
+
+      try {
+          // Use a basic context (empty) for this utility call
+          const summary = await this.llm.generateCompletion(systemPrompt, userPrompt, "", (usage) => this.updateStats(usage, 'System_Compressor'));
+          
+          const summaryMessage = {
+              id: Date.now().toString(),
+              role: 'system',
+              agentName: 'Context Manager',
+              content: `**[CONTEXT COMPRESSED]**\nThe following is a summary of the earlier conversation:\n\n${summary}`,
+              timestamp: Date.now()
+          };
+
+          return [summaryMessage, ...recentMessages];
+      } catch (err) {
+          console.error("Compression failed", err);
+          return messages; // Fallback
+      }
   }
 
   private emitSteps(steps: any[]) {
@@ -58,6 +172,10 @@ export class AgentOrchestrator {
   private emitDelta(delta: string) {
     if (this.mainWindow) {
       this.mainWindow.webContents.send(CHANNELS.TO_RENDERER.AGENT_CONTENT_UPDATE, { delta });
+      
+      // Live estimation
+      this.currentTurnStats.output += delta.length / 4;
+      this.emitStats();
     }
   }
 
@@ -102,6 +220,7 @@ export class AgentOrchestrator {
 
       if (nextAgent === 'Router') {
         this.emitStatus('Router');
+        this.currentTurnStats.agent = 'Router';
         const routerSystemPrompt = ROUTER_PROMPT;
 
         const taskContext = this.currentTasks.length > 0
@@ -112,7 +231,7 @@ export class AgentOrchestrator {
 
         let routerResponse = "";
         try {
-          const stream = this.llm.generateCompletionStream(routerSystemPrompt, routerInput, formattedContext, signal);
+          const stream = this.llm.generateCompletionStream(routerSystemPrompt, routerInput, formattedContext, signal, (usage) => this.updateStats(usage, 'Router'));
           for await (const chunk of stream) {
             if (signal.aborted) break;
             routerResponse += chunk;
@@ -128,6 +247,7 @@ export class AgentOrchestrator {
 
           steps.push({ agent: 'Router', input: 'Deciding next step...', output: `Selected: ${nextAgent}`, reasoning });
           this.emitSteps(steps);
+          this.commitTurn();
 
           if (nextAgent === 'FINISH') break;
 
@@ -153,10 +273,11 @@ export class AgentOrchestrator {
         if (nextAgent === 'QA') agentSystemPrompt = QA_PROMPT;
         if (nextAgent === 'Reviewer') agentSystemPrompt = REVIEWER_PROMPT;
 
+        this.currentTurnStats.agent = nextAgent;
         let agentOutput = "";
 
         try {
-          const stream = this.llm.generateCompletionStream(agentSystemPrompt, currentInput, formattedContext, signal);
+          const stream = this.llm.generateCompletionStream(agentSystemPrompt, currentInput, formattedContext, signal, (usage) => this.updateStats(usage, nextAgent));
 
           let turnHeader = "";
           if (finalContent !== "") turnHeader = `\n\n--- Next Step: ${nextAgent} ---\n\n`;
@@ -264,6 +385,7 @@ export class AgentOrchestrator {
 
           steps.push({ agent: nextAgent, input: '...', output: agentOutput });
           this.emitSteps(steps);
+          this.commitTurn();
           nextAgent = 'Router';
 
         } catch (err: any) {
