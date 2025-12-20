@@ -14,7 +14,8 @@ export const CHANNELS = {
     GET_SETTINGS: 'get-settings',
     SAVE_SETTINGS: 'save-settings',
     TASK_CONFIRMATION_DECISION: 'task-confirmation-decision',
-    ABORT_WORKFLOW: 'abort-workflow'
+    ABORT_WORKFLOW: 'abort-workflow',
+    CHECK_SYNTAX: 'check-syntax'
   },
     TO_RENDERER: {
         AGENT_STEP_UPDATE: 'agent:step-update',

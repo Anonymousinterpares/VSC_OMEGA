@@ -3,6 +3,7 @@ import path from 'path';
 import { FileSystemService } from './services/FileSystem';
 import { SettingsService } from './services/SettingsService';
 import { LLMService } from './services/LLMService';
+import { SyntaxService } from './services/SyntaxService';
 import { CHANNELS } from '../shared/constants';
 
 import { AgentOrchestrator } from './agents/AgentOrchestrator';
@@ -42,6 +43,7 @@ app.whenReady().then(() => {
   // Initialize Services
   settingsService = new SettingsService();
   fileSystemService = new FileSystemService(mainWindow);
+  new SyntaxService(); // Self-registering IPC handlers
   llmService = new LLMService(settingsService);
   proposalManager = new ProposalManager(mainWindow);
   orchestrator = new AgentOrchestrator(llmService, fileSystemService, mainWindow, proposalManager);

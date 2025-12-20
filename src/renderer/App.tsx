@@ -234,6 +234,54 @@ function App() {
       }
   }, []);
 
+  // Determine language from file extension
+  const getLanguageFromFilename = (filename: string): string => {
+      const ext = filename.split('.').pop()?.toLowerCase();
+      switch (ext) {
+          case 'ts':
+          case 'tsx': return 'typescript';
+          case 'js':
+          case 'jsx': return 'javascript';
+          case 'py': return 'python';
+          case 'css': return 'css';
+          case 'html': return 'html';
+          case 'json': return 'json';
+          case 'md': return 'markdown';
+          default: return 'text'; // Fallback
+      }
+  };
+
+  const language = selectedFile ? getLanguageFromFilename(selectedFile) : 'typescript';
+  const syntaxTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Syntax Checking Effect
+  useEffect(() => {
+      if (language === 'python' && editorRef.current && monacoRef.current && window.electron) {
+          const model = editorRef.current.getModel();
+          
+          if (syntaxTimeoutRef.current) clearTimeout(syntaxTimeoutRef.current);
+          
+          syntaxTimeoutRef.current = setTimeout(async () => {
+              try {
+                  const markers = await window.electron.ipcRenderer.invoke(CHANNELS.TO_MAIN.CHECK_SYNTAX, {
+                      language,
+                      content: fileContent
+                  });
+                  
+                  if (model) {
+                      monacoRef.current.editor.setModelMarkers(model, 'owner', markers);
+                  }
+              } catch (e) {
+                  console.error("Syntax Check Failed", e);
+              }
+          }, 800); // Debounce 800ms
+      }
+      
+      return () => {
+          if (syntaxTimeoutRef.current) clearTimeout(syntaxTimeoutRef.current);
+      };
+  }, [fileContent, language]);
+
   return (
     <div className="flex h-screen w-screen bg-gray-950 text-gray-300 overflow-hidden font-sans relative">
       <SettingsModal />
@@ -254,7 +302,7 @@ function App() {
             {selectedFile ? (
                 <Editor 
                     height="100%" 
-                    defaultLanguage="typescript" 
+                    language={language}
                     theme="vs-dark"
                     value={fileContent}
                     onChange={handleFileChange}
