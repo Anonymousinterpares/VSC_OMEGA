@@ -38,7 +38,7 @@ export const MissionStatus: React.FC = () => {
           <div key={task.id} className="flex items-center gap-2 text-sm p-1 hover:bg-[#2d2d2d] rounded">
             <StatusIcon status={task.status} />
             <span className={`flex-1 truncate ${task.status === 'completed' ? 'text-gray-500 line-through' : 'text-gray-200'}`}>
-              {task.description}
+              <span className="font-bold mr-1">{task.id}:</span> {task.description}
             </span>
             {task.status === 'review_pending' && (
                <span className="text-[10px] bg-yellow-900 text-yellow-200 px-1 rounded border border-yellow-700">

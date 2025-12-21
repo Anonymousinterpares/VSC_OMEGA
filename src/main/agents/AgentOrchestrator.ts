@@ -246,7 +246,7 @@ export class AgentOrchestrator {
         const routerSystemPrompt = ROUTER_PROMPT;
 
         const taskContext = this.currentTasks.length > 0
-          ? `\n### CURRENT PLAN STATUS:\n${this.currentTasks.map(t => `- [${t.status === 'completed' ? 'x' : ' '}] ${t.description}`).join('\n')}`
+          ? `\n### CURRENT PLAN STATUS:\n${this.currentTasks.map(t => `- [${t.status === 'completed' ? 'x' : ' '}] **${t.id}:** ${t.description}`).join('\n')}`
           : "";
 
         const routerInput = `${currentHistory}${taskContext}\n\n[SYSTEM]: Based on the history above, who should act next? (Analyser, Planner, Coder, QA, Reviewer, or FINISH). Return JSON.`;
@@ -367,78 +367,87 @@ export class AgentOrchestrator {
           if (signal.aborted) break;
 
           // --- TASK STATUS PARSING ---
-          const completedMatch = agentOutput.match(/\[COMPLETED:\s*(?:Task\s*)?(\d+)\]/gi);
-          const verifiedMatch = agentOutput.match(/\[VERIFIED:\s*(?:Task\s*)?(\d+)\]/gi);
-          const rejectedMatch = agentOutput.match(/\[REJECTED:\s*(?:Task\s*)?(\d+)\]/gi);
+          const completedMatch = agentOutput.match(/\[COMPLETED:\s*(?:Task\s*)?([\d,\s]+)\]/gi);
+          const verifiedMatch = agentOutput.match(/\[VERIFIED:\s*(?:Task\s*)?([\d,\s]+)\]/gi);
+          const rejectedMatch = agentOutput.match(/\[REJECTED:\s*(?:Task\s*)?([\d,\s]+)\]/gi);
 
           if (completedMatch) {
               completedMatch.forEach(tag => {
-                  const idMatch = tag.match(/\d+/);
-                  if (idMatch) {
-                      const task = this.currentTasks.find(t => t.id === idMatch[0] || t.id === `Task ${idMatch[0]}`);
-                      if (task && task.status !== 'completed') {
-                          if (autoMarkTasks) {
-                              task.status = 'completed';
-                              const msg = `\n\n[System: Auto-marked Task ${task.id} as COMPLETED]`;
-                              finalContent += msg;
-                              this.emitDelta(msg);
-                          } else {
-                              task.status = 'review_pending';
-                              const msg = `\n\n[System: Task ${task.id} marked for REVIEW]`;
-                              finalContent += msg;
-                              this.emitDelta(msg);
+                  const content = tag.match(/\[COMPLETED:\s*(?:Task\s*)?([\d,\s]+)\]/i);
+                  if (content && content[1]) {
+                      const ids = content[1].split(',').map(s => s.trim()).filter(Boolean);
+                      ids.forEach(id => {
+                          const task = this.currentTasks.find(t => t.id === id || t.id === `Task ${id}`);
+                          if (task && task.status !== 'completed') {
+                              if (autoMarkTasks) {
+                                  task.status = 'completed';
+                                  const msg = `\n\n[System: Auto-marked Task ${task.id} as COMPLETED]`;
+                                  finalContent += msg;
+                                  this.emitDelta(msg);
+                              } else {
+                                  task.status = 'review_pending';
+                                  const msg = `\n\n[System: Task ${task.id} marked for REVIEW]`;
+                                  finalContent += msg;
+                                  this.emitDelta(msg);
+                              }
                           }
-                          this.emitPlan();
-                      }
+                      });
+                      this.emitPlan();
                   }
               });
           }
 
           if (verifiedMatch) {
               for (const tag of verifiedMatch) {
-                  const idMatch = tag.match(/\d+/);
-                  if (idMatch) {
-                      const task = this.currentTasks.find(t => t.id === idMatch[0] || t.id === `Task ${idMatch[0]}`);
-                      if (task && (task.status === 'review_pending' || task.status === 'in_progress')) {
-                          if (autoMarkTasks) {
-                              task.status = 'completed';
-                              const msg = `\n\n✅ [System: Task ${task.id} VERIFIED and COMPLETED]`;
-                              finalContent += msg;
-                              this.emitDelta(msg);
-                          } else {
-                              if (signal.aborted) break;
-                              const result = await this.proposalManager.requestTaskConfirmation(task.description);
-                              if (result.status === 'confirmed') {
+                  const content = tag.match(/\[VERIFIED:\s*(?:Task\s*)?([\d,\s]+)\]/i);
+                  if (content && content[1]) {
+                      const ids = content[1].split(',').map(s => s.trim()).filter(Boolean);
+                      for (const id of ids) {
+                          const task = this.currentTasks.find(t => t.id === id || t.id === `Task ${id}`);
+                          if (task && (task.status === 'review_pending' || task.status === 'in_progress')) {
+                              if (autoMarkTasks) {
                                   task.status = 'completed';
-                                  const msg = `\n\n✅ [System: User confirmed Task ${task.id}]`;
+                                  const msg = `\n\n✅ [System: Task ${task.id} VERIFIED and COMPLETED]`;
                                   finalContent += msg;
                                   this.emitDelta(msg);
                               } else {
-                                  task.status = 'in_progress';
-                                  const msg = `\n\n❌ [System: User rejected Task ${task.id}: ${result.comment}]`;
-                                  finalContent += msg;
-                                  this.emitDelta(msg);
-                                  currentHistory += `\n[User Rejection]: Task ${task.id} was rejected. Reason: ${result.comment}`;
+                                  if (signal.aborted) break;
+                                  const result = await this.proposalManager.requestTaskConfirmation(task.description);
+                                  if (result.status === 'confirmed') {
+                                      task.status = 'completed';
+                                      const msg = `\n\n✅ [System: User confirmed Task ${task.id}]`;
+                                      finalContent += msg;
+                                      this.emitDelta(msg);
+                                  } else {
+                                      task.status = 'in_progress';
+                                      const msg = `\n\n❌ [System: User rejected Task ${task.id}: ${result.comment}]`;
+                                      finalContent += msg;
+                                      this.emitDelta(msg);
+                                      currentHistory += `\n[User Rejection]: Task ${task.id} was rejected. Reason: ${result.comment}`;
+                                  }
                               }
                           }
-                          this.emitPlan();
                       }
+                      this.emitPlan();
                   }
               }
           }
 
           if (rejectedMatch) {
               rejectedMatch.forEach(tag => {
-                  const idMatch = tag.match(/\d+/);
-                  if (idMatch) {
-                      const task = this.currentTasks.find(t => t.id === idMatch[0] || t.id === `Task ${idMatch[0]}`);
-                      if (task) {
-                          task.status = 'in_progress';
-                          const msg = `\n\n❌ [System: Task ${task.id} REJECTED by Reviewer]`;
-                          finalContent += msg;
-                          this.emitDelta(msg);
-                          this.emitPlan();
-                      }
+                  const content = tag.match(/\[REJECTED:\s*(?:Task\s*)?([\d,\s]+)\]/i);
+                  if (content && content[1]) {
+                      const ids = content[1].split(',').map(s => s.trim()).filter(Boolean);
+                      ids.forEach(id => {
+                          const task = this.currentTasks.find(t => t.id === id || t.id === `Task ${id}`);
+                          if (task) {
+                              task.status = 'in_progress';
+                              const msg = `\n\n❌ [System: Task ${task.id} REJECTED by Reviewer]`;
+                              finalContent += msg;
+                              this.emitDelta(msg);
+                          }
+                      });
+                      this.emitPlan();
                   }
               });
           }
