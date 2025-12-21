@@ -23,6 +23,7 @@ interface IOrchestratorResponse {
 
 export class AgentOrchestrator {
   private llm: LLMService;
+  private fileSystem: FileSystemService;
   private tools: ToolHandler;
   private mainWindow: BrowserWindow | null;
   private currentTasks: ITask[] = [];
@@ -41,8 +42,12 @@ export class AgentOrchestrator {
     agent: ''
   };
 
+  // Files modified or read during the session (Auto-Context)
+  private projectWorkingSet = new Map<string, string>();
+
   constructor(llm: LLMService, fileSystem: FileSystemService, mainWindow: BrowserWindow | null, proposalManager: ProposalManager) {
     this.llm = llm;
+    this.fileSystem = fileSystem;
     this.mainWindow = mainWindow;
     this.proposalManager = proposalManager;
     this.tools = new ToolHandler(fileSystem, proposalManager);
@@ -200,7 +205,9 @@ export class AgentOrchestrator {
     this.abortController = new AbortController();
     const signal = this.abortController.signal;
 
-    const formattedContext = this.formatContext(context);
+    // Build context with persistent working set
+    let formattedContext = this.buildContextString(context, context?.fileTree, this.projectWorkingSet);
+
     let currentHistory = `User Request: ${message}`;
     let loopCount = 0;
     const MAX_LOOPS = 15;
@@ -211,6 +218,10 @@ export class AgentOrchestrator {
 
     while (loopCount < MAX_LOOPS) {
       if (signal.aborted) break;
+
+      // Refresh Context with latest file structure and session changes
+      const freshTree = await this.fileSystem.getFileTree();
+      formattedContext = this.buildContextString(context, freshTree, this.projectWorkingSet);
 
       // Force finish if all tasks are done
       if (this.currentTasks.length > 0 && this.currentTasks.every(t => t.status === 'completed')) {
@@ -316,16 +327,29 @@ export class AgentOrchestrator {
             if (writeMatch) {
                 const [fullMatch, path, content] = writeMatch;
                 result = await this.tools.executeWrite(path, content, autoApply);
+                this.projectWorkingSet.set(path, content);
                 streamBuffer = streamBuffer.replace(fullMatch, ""); 
                 toolExecuted = true;
             } else if (replaceMatch) {
                 const [fullMatch, path, oldStr, newStr] = replaceMatch;
                 result = await this.tools.executeReplace(path, oldStr, newStr, autoApply);
+                if (result) {
+                   try {
+                       const fullContent = await this.fileSystem.handleReadFile(path);
+                       this.projectWorkingSet.set(path, fullContent);
+                   } catch (e) { /* ignore read error */ }
+                }
                 streamBuffer = streamBuffer.replace(fullMatch, "");
                 toolExecuted = true;
             } else if (readMatch) {
                 const [fullMatch, path] = readMatch;
                 result = await this.tools.executeRead(path);
+                if (result) {
+                   try {
+                       const fullContent = await this.fileSystem.handleReadFile(path);
+                       this.projectWorkingSet.set(path, fullContent);
+                   } catch (e) { /* ignore */ }
+                }
                 streamBuffer = streamBuffer.replace(fullMatch, "");
                 toolExecuted = true;
             }
@@ -423,9 +447,7 @@ export class AgentOrchestrator {
             this.parseChecklist(agentOutput);
           }
 
-          if (nextAgent !== 'Coder') {
-            currentHistory += `\n\n### ${nextAgent} Output:\n${agentOutput}`;
-          }
+          currentHistory += `\n\n### ${nextAgent} Output:\n${agentOutput}`;
 
           steps.push({ agent: nextAgent, input: '...', output: agentOutput });
           this.emitSteps(steps);
@@ -494,11 +516,11 @@ export class AgentOrchestrator {
   }
 
   // Helper to flatten context
-  private formatContext(context: any): string {
+  private buildContextString(baseContext: any, fileTree: any[], modifiedFiles: Map<string, string>): string {
       let output = "";
 
       // 1. File Tree (Structure)
-      if (context && context.fileTree) {
+      if (fileTree) {
           const flatten = (nodes: any[]): string[] => {
               let paths: string[] = [];
               for (const node of nodes) {
@@ -510,20 +532,30 @@ export class AgentOrchestrator {
               }
               return paths;
           };
-          const paths = flatten(context.fileTree);
+          const paths = flatten(fileTree);
           output += `Project Files (Structure):\n${paths.join('\n')}\n\n`;
       }
 
-      // 2. Active Context (Fragments/Files selected by User)
-      if (context && context.activeContext && context.activeContext.length > 0) {
+      // 2. Active Context (User Selected)
+      if (baseContext && baseContext.activeContext && baseContext.activeContext.length > 0) {
           output += "### ACTIVE CONTEXT (User Selected):\n";
-          for (const item of context.activeContext) {
+          for (const item of baseContext.activeContext) {
+              // We trust the user-selected context, but ideally it should be fresh too.
+              // For now, we assume user selections are static references.
               if (item.type === 'fragment') {
                   output += `\n### FRAGMENT: ${item.path} (Lines ${item.startLine}-${item.endLine})\n${item.content}\n### END FRAGMENT\n`;
               } else if (item.type === 'file') {
-                  // For whole files added to context
                   output += `\n### FILE: ${item.path}\n${item.content}\n### END FILE\n`;
               }
+          }
+          output += "\n";
+      }
+
+      // 3. Recently Modified (Session Context)
+      if (modifiedFiles.size > 0) {
+          output += "### RECENTLY MODIFIED FILES (Auto-Context):\n";
+          for (const [path, content] of modifiedFiles) {
+              output += `\n### FILE: ${path}\n${content}\n### END FILE\n`;
           }
           output += "\n";
       }

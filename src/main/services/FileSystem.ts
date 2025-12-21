@@ -155,6 +155,11 @@ export class FileSystemService {
     });
   }
 
+  async getFileTree(): Promise<IFileNode[]> {
+    if (!this.projectRoot) return [];
+    return await this.readDirectory(this.projectRoot);
+  }
+
   async handleSearch(options: ISearchOptions): Promise<ISearchResult[]> {
     if (!this.projectRoot) {
         return [];
