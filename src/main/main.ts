@@ -8,6 +8,7 @@ import { CHANNELS } from '../shared/constants';
 
 import { AgentOrchestrator } from './agents/AgentOrchestrator';
 import { ProposalManager } from './services/ProposalManager';
+import { WorkflowService } from './services/WorkflowService';
 
 let mainWindow: BrowserWindow | null = null;
 let fileSystemService: FileSystemService;
@@ -15,6 +16,7 @@ let settingsService: SettingsService;
 let llmService: LLMService;
 let proposalManager: ProposalManager;
 let orchestrator: AgentOrchestrator;
+let workflowService: WorkflowService;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -24,9 +26,13 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
+      sandbox: false,
     },
   });
+}
 
+function loadApp() {
+  if (!mainWindow) return;
   if (process.env.NODE_ENV === 'development') {
     mainWindow.loadURL('http://localhost:5173');
     mainWindow.webContents.openDevTools();
@@ -46,7 +52,8 @@ app.whenReady().then(() => {
   new SyntaxService(); // Self-registering IPC handlers
   llmService = new LLMService(settingsService);
   proposalManager = new ProposalManager(mainWindow);
-  orchestrator = new AgentOrchestrator(llmService, fileSystemService, mainWindow, proposalManager);
+  workflowService = new WorkflowService(process.cwd()); // Use CWD for workflow.json
+  orchestrator = new AgentOrchestrator(llmService, fileSystemService, workflowService, mainWindow, proposalManager);
 
   // IPC Handlers
   ipcMain.on(CHANNELS.TO_MAIN.OPEN_FOLDER, () => fileSystemService.handleOpenFolder());
@@ -112,6 +119,29 @@ app.whenReady().then(() => {
       return { success: true };
   });
 
+  // Workflow Handlers
+  ipcMain.handle(CHANNELS.TO_MAIN.GET_WORKFLOW, async () => {
+      return await workflowService.loadWorkflow();
+  });
+
+  ipcMain.handle(CHANNELS.TO_MAIN.SAVE_WORKFLOW, async (_, workflow) => {
+      await workflowService.saveWorkflow(workflow);
+      return { success: true };
+  });
+
+  ipcMain.handle(CHANNELS.TO_MAIN.RESET_WORKFLOW, async () => {
+      workflowService.resetToDefault();
+      return workflowService.getCurrentWorkflow();
+  });
+
+  ipcMain.handle(CHANNELS.TO_MAIN.UNDO_WORKFLOW, async () => {
+      return workflowService.undo();
+  });
+
+  ipcMain.handle(CHANNELS.TO_MAIN.REDO_WORKFLOW, async () => {
+      return workflowService.redo();
+  });
+
   // Handle App Closing
   let isQuitting = false;
   mainWindow.on('close', (e) => {
@@ -137,32 +167,12 @@ app.whenReady().then(() => {
           });
 
           if (response.response === 0) {
-              // Save All & Exit - Tell renderer to save all
-              // We need a channel for this, or we can just ask user to save manually.
-              // For true robustness: Renderer should have a 'saveAll' method invoked via IPC or we assume user did it.
-              // Simplification for this step: We trust the Backup system for "Exit without Saving" scenario,
-              // but for "Save & Exit" we ideally want to commit to disk.
-              // Let's ask renderer to save all and then quit.
-              
-              // However, since we are in the main process, we can't easily trigger the renderer's save logic synchronously 
-              // AND wait for it before quitting in this callback structure without complex event chaining.
-              
-              // Strategy: Just let the user know they need to save, OR (better) implement SAVE_ALL channel.
-              // Given the complexity:
-              // For now, if they click "Save All", we will effectively "Cancel" the close and tell them to save.
-              // OR better: we accept the "Exit without Saving" because we HAVE BACKUPS.
-              
-              // Refined Logic for "Save All":
-              // We can't easily reach into React state to get content to write.
-              // So "Save All" is tricky from here without a prior 'push' of content.
-              // But wait! We DO have the backups! We can commit the backups to real files!
-              
               await fileSystemService.commitBackupsToFiles();
               isQuitting = true;
               app.quit();
 
           } else if (response.response === 1) {
-              // Exit without Saving (Backups might persist or be cleared depending on policy, currently they persist until explicit save)
+              // Exit without Saving
               isQuitting = true;
               app.quit();
           } 
@@ -173,8 +183,14 @@ app.whenReady().then(() => {
       }
   });
 
+  // LOAD APP CONTENT NOW - AFTER ALL HANDLERS ARE REGISTERED
+  loadApp();
+
   app.on('activate', function () {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (BrowserWindow.getAllWindows().length === 0) {
+        createWindow();
+        loadApp();
+    }
   });
 });
 

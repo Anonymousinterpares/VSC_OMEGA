@@ -3,9 +3,8 @@ import { LLMService } from '../services/LLMService';
 import { ToolHandler } from './ToolHandler';
 import { FileSystemService } from '../services/FileSystem';
 import { ProposalManager } from '../services/ProposalManager';
-import { ANALYSER_PROMPT, PLANNER_PROMPT } from './definitions/01_Analysis_Planning';
-import { CODER_PROMPT, QA_PROMPT, REVIEWER_PROMPT } from './definitions/02_Coding_QA';
-import { ROUTER_PROMPT } from './definitions/03_Router';
+import { WorkflowService } from '../services/WorkflowService';
+import { ContextManager } from '../services/ContextManager';
 import { CHANNELS } from '../../shared/constants';
 import { ITask } from '../../shared/types';
 
@@ -25,6 +24,8 @@ export class AgentOrchestrator {
   private llm: LLMService;
   private fileSystem: FileSystemService;
   private tools: ToolHandler;
+  private workflowService: WorkflowService;
+  private contextManager: ContextManager;
   private mainWindow: BrowserWindow | null;
   private currentTasks: ITask[] = [];
   private proposalManager: ProposalManager;
@@ -45,12 +46,20 @@ export class AgentOrchestrator {
   // Files modified or read during the session (Auto-Context)
   private projectWorkingSet = new Map<string, string>();
 
-  constructor(llm: LLMService, fileSystem: FileSystemService, mainWindow: BrowserWindow | null, proposalManager: ProposalManager) {
+  constructor(
+      llm: LLMService, 
+      fileSystem: FileSystemService, 
+      workflowService: WorkflowService, 
+      mainWindow: BrowserWindow | null, 
+      proposalManager: ProposalManager
+  ) {
     this.llm = llm;
     this.fileSystem = fileSystem;
+    this.workflowService = workflowService;
     this.mainWindow = mainWindow;
     this.proposalManager = proposalManager;
     this.tools = new ToolHandler(fileSystem, proposalManager);
+    this.contextManager = new ContextManager();
   }
 
   public stop() {
@@ -201,12 +210,15 @@ export class AgentOrchestrator {
     const steps: { agent: string; input: string; output: string; reasoning?: string }[] = [];
     const autoApply = context?.autoApply ?? true;
     const autoMarkTasks = context?.autoMarkTasks ?? false;
+    
+    // Get Workflow Definition
+    const workflow = this.workflowService.getCurrentWorkflow();
 
     this.abortController = new AbortController();
     const signal = this.abortController.signal;
 
-    // Build context with persistent working set
-    let formattedContext = this.buildContextString(context, context?.fileTree, this.projectWorkingSet);
+    // Build context with persistent working set via ContextManager
+    let formattedContext = this.contextManager.buildContextString(context?.activeContext, context?.fileTree, this.projectWorkingSet);
 
     let currentHistory = `User Request: ${message}`;
     let loopCount = 0;
@@ -221,7 +233,7 @@ export class AgentOrchestrator {
 
       // Refresh Context with latest file structure and session changes
       const freshTree = await this.fileSystem.getFileTree();
-      formattedContext = this.buildContextString(context, freshTree, this.projectWorkingSet);
+      formattedContext = this.contextManager.buildContextString(context?.activeContext, freshTree, this.projectWorkingSet);
 
       // Force finish if all tasks are done
       if (this.currentTasks.length > 0 && this.currentTasks.every(t => t.status === 'completed')) {
@@ -243,7 +255,7 @@ export class AgentOrchestrator {
       if (nextAgent === 'Router') {
         this.emitStatus('Router');
         this.currentTurnStats.agent = 'Router';
-        const routerSystemPrompt = ROUTER_PROMPT;
+        const routerSystemPrompt = workflow.routerPrompt;
 
         const taskContext = this.currentTasks.length > 0
           ? `\n### CURRENT PLAN STATUS:\n${this.currentTasks.map(t => `- [${t.status === 'completed' ? 'x' : ' '}] **${t.id}:** ${t.description}`).join('\n')}`
@@ -288,12 +300,17 @@ export class AgentOrchestrator {
       if (nextAgent !== 'Router' && nextAgent !== 'FINISH') {
         if (signal.aborted) break;
 
-        let agentSystemPrompt = ROUTER_PROMPT; 
-        if (nextAgent === 'Analyser') agentSystemPrompt = ANALYSER_PROMPT;
-        if (nextAgent === 'Planner') agentSystemPrompt = PLANNER_PROMPT;
-        if (nextAgent === 'Coder') agentSystemPrompt = CODER_PROMPT;
-        if (nextAgent === 'QA') agentSystemPrompt = QA_PROMPT;
-        if (nextAgent === 'Reviewer') agentSystemPrompt = REVIEWER_PROMPT;
+        const agentDef = this.workflowService.getAgent(nextAgent);
+        
+        // Fallback or Error if agent not found
+        if (!agentDef) {
+             const errorMsg = `\n[System Error: Agent '${nextAgent}' not found in workflow definition.]\n`;
+             finalContent += errorMsg;
+             this.emitContent(finalContent);
+             break;
+        }
+
+        const agentSystemPrompt = agentDef.systemPrompt;
 
         this.currentTurnStats.agent = nextAgent;
         let agentOutput = "";
@@ -367,87 +384,94 @@ export class AgentOrchestrator {
           if (signal.aborted) break;
 
           // --- TASK STATUS PARSING ---
-          const completedMatch = agentOutput.match(/\[COMPLETED:\s*(?:Task\s*)?([\d,\s]+)\]/gi);
-          const verifiedMatch = agentOutput.match(/\[VERIFIED:\s*(?:Task\s*)?([\d,\s]+)\]/gi);
-          const rejectedMatch = agentOutput.match(/\[REJECTED:\s*(?:Task\s*)?([\d,\s]+)\]/gi);
+          const completedMatch = agentOutput.match(/\[COMPLETED:([^\]]+)\]/gi);
+          const verifiedMatch = agentOutput.match(/\[VERIFIED:([^\]]+)\]/gi);
+          const rejectedMatch = agentOutput.match(/\[REJECTED:([^\]]+)\]/gi);
 
           if (completedMatch) {
               completedMatch.forEach(tag => {
-                  const content = tag.match(/\[COMPLETED:\s*(?:Task\s*)?([\d,\s]+)\]/i);
-                  if (content && content[1]) {
-                      const ids = content[1].split(',').map(s => s.trim()).filter(Boolean);
-                      ids.forEach(id => {
-                          const task = this.currentTasks.find(t => t.id === id || t.id === `Task ${id}`);
-                          if (task && task.status !== 'completed') {
-                              if (autoMarkTasks) {
-                                  task.status = 'completed';
-                                  const msg = `\n\n[System: Auto-marked Task ${task.id} as COMPLETED]`;
-                                  finalContent += msg;
-                                  this.emitDelta(msg);
-                              } else {
-                                  task.status = 'review_pending';
-                                  const msg = `\n\n[System: Task ${task.id} marked for REVIEW]`;
-                                  finalContent += msg;
-                                  this.emitDelta(msg);
+                  const contentMatch = tag.match(/\[COMPLETED:([^\]]+)\]/i);
+                  if (contentMatch && contentMatch[1]) {
+                      const ids = contentMatch[1].match(/\d+/g); // Extract all numbers
+                      if (ids) {
+                          ids.forEach(id => {
+                              // Check strict ID match or "Task ID" match
+                              const task = this.currentTasks.find(t => t.id === id || t.id === `Task ${id}` || t.id.endsWith(` ${id}`));
+                              if (task && task.status !== 'completed') {
+                                  if (autoMarkTasks) {
+                                      task.status = 'completed';
+                                      const msg = `\n\n[System: Auto-marked Task ${task.id} as COMPLETED]`;
+                                      finalContent += msg;
+                                      this.emitDelta(msg);
+                                  } else {
+                                      task.status = 'review_pending';
+                                      const msg = `\n\n[System: Task ${task.id} marked for REVIEW]`;
+                                      finalContent += msg;
+                                      this.emitDelta(msg);
+                                  }
                               }
-                          }
-                      });
-                      this.emitPlan();
+                          });
+                          this.emitPlan();
+                      }
                   }
               });
           }
 
           if (verifiedMatch) {
               for (const tag of verifiedMatch) {
-                  const content = tag.match(/\[VERIFIED:\s*(?:Task\s*)?([\d,\s]+)\]/i);
-                  if (content && content[1]) {
-                      const ids = content[1].split(',').map(s => s.trim()).filter(Boolean);
-                      for (const id of ids) {
-                          const task = this.currentTasks.find(t => t.id === id || t.id === `Task ${id}`);
-                          if (task && (task.status === 'review_pending' || task.status === 'in_progress')) {
-                              if (autoMarkTasks) {
-                                  task.status = 'completed';
-                                  const msg = `\n\n✅ [System: Task ${task.id} VERIFIED and COMPLETED]`;
-                                  finalContent += msg;
-                                  this.emitDelta(msg);
-                              } else {
-                                  if (signal.aborted) break;
-                                  const result = await this.proposalManager.requestTaskConfirmation(task.description);
-                                  if (result.status === 'confirmed') {
+                  const contentMatch = tag.match(/\[VERIFIED:([^\]]+)\]/i);
+                  if (contentMatch && contentMatch[1]) {
+                      const ids = contentMatch[1].match(/\d+/g);
+                      if (ids) {
+                          for (const id of ids) {
+                              const task = this.currentTasks.find(t => t.id === id || t.id === `Task ${id}` || t.id.endsWith(` ${id}`));
+                              if (task && (task.status === 'review_pending' || task.status === 'in_progress')) {
+                                  if (autoMarkTasks) {
                                       task.status = 'completed';
-                                      const msg = `\n\n✅ [System: User confirmed Task ${task.id}]`;
+                                      const msg = `\n\n✅ [System: Task ${task.id} VERIFIED and COMPLETED]`;
                                       finalContent += msg;
                                       this.emitDelta(msg);
                                   } else {
-                                      task.status = 'in_progress';
-                                      const msg = `\n\n❌ [System: User rejected Task ${task.id}: ${result.comment}]`;
-                                      finalContent += msg;
-                                      this.emitDelta(msg);
-                                      currentHistory += `\n[User Rejection]: Task ${task.id} was rejected. Reason: ${result.comment}`;
+                                      if (signal.aborted) break;
+                                      const result = await this.proposalManager.requestTaskConfirmation(task.description);
+                                      if (result.status === 'confirmed') {
+                                          task.status = 'completed';
+                                          const msg = `\n\n✅ [System: User confirmed Task ${task.id}]`;
+                                          finalContent += msg;
+                                          this.emitDelta(msg);
+                                      } else {
+                                          task.status = 'in_progress';
+                                          const msg = `\n\n❌ [System: User rejected Task ${task.id}: ${result.comment}]`;
+                                          finalContent += msg;
+                                          this.emitDelta(msg);
+                                          currentHistory += `\n[User Rejection]: Task ${task.id} was rejected. Reason: ${result.comment}`;
+                                      }
                                   }
                               }
                           }
+                          this.emitPlan();
                       }
-                      this.emitPlan();
                   }
               }
           }
 
           if (rejectedMatch) {
               rejectedMatch.forEach(tag => {
-                  const content = tag.match(/\[REJECTED:\s*(?:Task\s*)?([\d,\s]+)\]/i);
-                  if (content && content[1]) {
-                      const ids = content[1].split(',').map(s => s.trim()).filter(Boolean);
-                      ids.forEach(id => {
-                          const task = this.currentTasks.find(t => t.id === id || t.id === `Task ${id}`);
-                          if (task) {
-                              task.status = 'in_progress';
-                              const msg = `\n\n❌ [System: Task ${task.id} REJECTED by Reviewer]`;
-                              finalContent += msg;
-                              this.emitDelta(msg);
-                          }
-                      });
-                      this.emitPlan();
+                  const contentMatch = tag.match(/\[REJECTED:([^\]]+)\]/i);
+                  if (contentMatch && contentMatch[1]) {
+                      const ids = contentMatch[1].match(/\d+/g);
+                      if (ids) {
+                          ids.forEach(id => {
+                              const task = this.currentTasks.find(t => t.id === id || t.id === `Task ${id}` || t.id.endsWith(` ${id}`));
+                              if (task) {
+                                  task.status = 'in_progress';
+                                  const msg = `\n\n❌ [System: Task ${task.id} REJECTED by Reviewer]`;
+                                  finalContent += msg;
+                                  this.emitDelta(msg);
+                              }
+                          });
+                          this.emitPlan();
+                      }
                   }
               });
           }
@@ -522,53 +546,5 @@ export class AgentOrchestrator {
       }
       this.emitPlan();
     }
-  }
-
-  // Helper to flatten context
-  private buildContextString(baseContext: any, fileTree: any[], modifiedFiles: Map<string, string>): string {
-      let output = "";
-
-      // 1. File Tree (Structure)
-      if (fileTree) {
-          const flatten = (nodes: any[]): string[] => {
-              let paths: string[] = [];
-              for (const node of nodes) {
-                  if (node.type === 'file') {
-                      paths.push(node.path);
-                  } else if (node.children) {
-                      paths = [...paths, ...flatten(node.children)];
-                  }
-              }
-              return paths;
-          };
-          const paths = flatten(fileTree);
-          output += `Project Files (Structure):\n${paths.join('\n')}\n\n`;
-      }
-
-      // 2. Active Context (User Selected)
-      if (baseContext && baseContext.activeContext && baseContext.activeContext.length > 0) {
-          output += "### ACTIVE CONTEXT (User Selected):\n";
-          for (const item of baseContext.activeContext) {
-              // We trust the user-selected context, but ideally it should be fresh too.
-              // For now, we assume user selections are static references.
-              if (item.type === 'fragment') {
-                  output += `\n### FRAGMENT: ${item.path} (Lines ${item.startLine}-${item.endLine})\n${item.content}\n### END FRAGMENT\n`;
-              } else if (item.type === 'file') {
-                  output += `\n### FILE: ${item.path}\n${item.content}\n### END FILE\n`;
-              }
-          }
-          output += "\n";
-      }
-
-      // 3. Recently Modified (Session Context)
-      if (modifiedFiles.size > 0) {
-          output += "### RECENTLY MODIFIED FILES (Auto-Context):\n";
-          for (const [path, content] of modifiedFiles) {
-              output += `\n### FILE: ${path}\n${content}\n### END FILE\n`;
-          }
-          output += "\n";
-      }
-
-      return output;
   }
 }

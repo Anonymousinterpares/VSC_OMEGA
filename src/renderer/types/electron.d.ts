@@ -5,10 +5,16 @@ export interface IElectronAPI {
     invoke: (channel: string, data?: any) => Promise<any>;
     removeAllListeners: (channel: string) => void;
   };
-}
-
-declare global {
-  interface Window {
-    electron: IElectronAPI;
+      taskConfirmationDecision: (data: { id: string; status: 'confirmed' | 'rejected'; comment?: string }) => Promise<{ success: boolean }>;
+      
+      // Workflow
+      workflow: {
+        get: () => Promise<any>;
+        save: (workflow: any) => Promise<{ success: boolean }>;
+        reset: () => Promise<any>;
+        undo: () => Promise<any>;
+        redo: () => Promise<any>;
+      };
+    };
   }
 }

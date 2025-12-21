@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import { CHANNELS } from '../shared/constants';
 
 contextBridge.exposeInMainWorld('electron', {
   ipcRenderer: {
@@ -11,4 +12,13 @@ contextBridge.exposeInMainWorld('electron', {
     invoke: (channel: string, data?: any) => ipcRenderer.invoke(channel, data),
     removeAllListeners: (channel: string) => ipcRenderer.removeAllListeners(channel),
   },
+  taskConfirmationDecision: (data: any) => ipcRenderer.invoke(CHANNELS.TO_MAIN.TASK_CONFIRMATION_DECISION, data),
+  
+  workflow: {
+    get: () => ipcRenderer.invoke(CHANNELS.TO_MAIN.GET_WORKFLOW),
+    save: (workflow: any) => ipcRenderer.invoke(CHANNELS.TO_MAIN.SAVE_WORKFLOW, workflow),
+    reset: () => ipcRenderer.invoke(CHANNELS.TO_MAIN.RESET_WORKFLOW),
+    undo: () => ipcRenderer.invoke(CHANNELS.TO_MAIN.UNDO_WORKFLOW),
+    redo: () => ipcRenderer.invoke(CHANNELS.TO_MAIN.REDO_WORKFLOW),
+  }
 });

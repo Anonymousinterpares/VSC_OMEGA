@@ -9,16 +9,23 @@ export const CHANNELS = {
     GET_BACKUPS: 'get-backups',
     RESTORE_BACKUP: 'restore-backup',
     CHECK_DIRTY: 'check-dirty',
-    SEND_MESSAGE: 'send-message',
-    REVIEW_DECISION: 'review-decision',
     GET_SETTINGS: 'get-settings',
     SAVE_SETTINGS: 'save-settings',
-    TASK_CONFIRMATION_DECISION: 'task-confirmation-decision',
-    ABORT_WORKFLOW: 'abort-workflow',
     CHECK_SYNTAX: 'check-syntax',
-    COMPRESS_CONTEXT: 'compress-context'
+    SEND_MESSAGE: 'send-message',
+    ABORT_WORKFLOW: 'abort-workflow',
+    COMPRESS_CONTEXT: 'compress-context',
+    REVIEW_DECISION: 'review-decision',
+    TASK_CONFIRMATION_DECISION: 'task-confirmation-decision',
+
+    // Workflow Editor
+    GET_WORKFLOW: 'get-workflow',
+    SAVE_WORKFLOW: 'save-workflow',
+    RESET_WORKFLOW: 'reset-workflow',
+    UNDO_WORKFLOW: 'undo-workflow',
+    REDO_WORKFLOW: 'redo-workflow'
   },
-    TO_RENDERER: {
+  TO_RENDERER: {
         AGENT_STEP_UPDATE: 'agent:step-update',
         AGENT_CONTENT_UPDATE: 'agent:content-update',
         AGENT_STATUS_UPDATE: 'agent:status-update',

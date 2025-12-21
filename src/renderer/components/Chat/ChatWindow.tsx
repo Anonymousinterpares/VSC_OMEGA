@@ -288,7 +288,7 @@ export const ChatWindow: React.FC = () => {
   const [currentAgent, setCurrentAgent] = useState<string | null>(null);
   const [autoApply, setAutoApply] = useState(true);
   
-  const { strictMode, setStrictMode, setTasks, initiateMission } = useTaskStore();
+  const { strictMode, setStrictMode, setTasks, initiateMission, stopTimer } = useTaskStore();
   const autoMarkTasks = !strictMode;
   const setAutoMarkTasks = (val: boolean) => setStrictMode(!val);
   
@@ -400,6 +400,7 @@ export const ChatWindow: React.FC = () => {
       } finally {
           setIsThinking(false);
           setCurrentAgent(null);
+          stopTimer(); // Stop timer when done
       }
   };
 
@@ -408,6 +409,7 @@ export const ChatWindow: React.FC = () => {
         await window.electron.ipcRenderer.invoke(CHANNELS.TO_MAIN.ABORT_WORKFLOW);
         setIsThinking(false);
         setCurrentAgent(null);
+        stopTimer(); // Stop timer on abort
     }
   };
 
@@ -499,6 +501,7 @@ export const ChatWindow: React.FC = () => {
     } finally {
         setIsThinking(false);
         setCurrentAgent(null);
+        stopTimer(); // Stop timer when workflow completes
     }
   };
 

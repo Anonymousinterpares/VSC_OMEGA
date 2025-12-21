@@ -18,6 +18,7 @@ interface TaskState {
   updateTaskStatus: (id: string, status: ITask['status']) => void;
   setStrictMode: (enabled: boolean) => void;
   initiateMission: () => void;
+  stopTimer: () => void; // Manually stop the timer (e.g. agent finished turn)
   resetTasks: () => void;
 }
 
@@ -27,7 +28,14 @@ export const useTaskStore = create<TaskState>((set) => ({
   startTime: null,
   endTime: null,
 
-  initiateMission: () => set({ startTime: Date.now(), endTime: null }),
+  initiateMission: () => set((state) => ({ 
+      startTime: state.startTime || Date.now(), // Preserve start time if continuing
+      endTime: null 
+  })),
+
+  stopTimer: () => set((state) => ({
+      endTime: state.endTime || Date.now()
+  })),
 
   setTasks: (newTasks) => set((state) => {
     // Heuristic: If we have no tasks, or the first task is different (ID or description), it's a new mission.
@@ -39,26 +47,19 @@ export const useTaskStore = create<TaskState>((set) => ({
     let newEndTime = state.endTime;
 
     if (isNewMission) {
-        // If the timer is NOT running (startTime null OR endTime set from prev mission), start it now.
-        // If the timer IS running (startTime set AND endTime null), it means initiateMission was likely called 
-        // by the user interaction starting this flow, so we preserve that earlier startTime.
-        if (state.startTime === null || state.endTime !== null) {
-            newStartTime = newTasks.length > 0 ? Date.now() : null;
-        }
+        newStartTime = newTasks.length > 0 ? Date.now() : null;
         newEndTime = null;
     } else if (state.startTime === null && newTasks.length > 0) {
-        // Fallback: if we had tasks but no start time (shouldn't happen often), set it now
         newStartTime = Date.now();
     }
 
     // Check completion
     const allCompleted = newTasks.length > 0 && newTasks.every(t => t.status === 'completed');
-    if (allCompleted && !newEndTime) {
+    if (allCompleted) {
         newEndTime = Date.now();
-    } else if (!allCompleted && newEndTime) {
-        // If we reopened a task or added a new one, clear the end time
-        newEndTime = null;
-    }
+    } 
+    // If not all completed, we DON'T automatically clear endTime here because we might want to keep it stopped 
+    // until the next agent turn (initiateMission will clear it).
 
     return { 
         tasks: newTasks,
@@ -73,12 +74,10 @@ export const useTaskStore = create<TaskState>((set) => ({
     const allCompleted = newTasks.length > 0 && newTasks.every(t => t.status === 'completed');
     let newEndTime = state.endTime;
 
-    if (allCompleted && !newEndTime) {
+    if (allCompleted) {
         newEndTime = Date.now();
-    } else if (!allCompleted && newEndTime) {
-        newEndTime = null;
     }
-
+    
     return {
         tasks: newTasks,
         endTime: newEndTime

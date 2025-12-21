@@ -3,11 +3,13 @@ import { useSettingsStore } from './store/useSettingsStore';
 import { useFileStore } from './store/useFileStore';
 import { useContextStore } from './store/useContextStore';
 import { useSearchStore } from './store/useSearchStore';
+import { useViewStore } from './store/useViewStore';
 import { SettingsModal } from './components/Modals/SettingsModal';
 import { Sidebar } from './components/Sidebar/Sidebar';
 import { ChatWindow } from './components/Chat/ChatWindow';
 import { ReviewWindow } from './components/Modals/ReviewWindow';
 import { TabBar } from './components/Editor/TabBar';
+import { WorkflowEditor } from './components/WorkflowEditor/WorkflowEditor';
 import Editor, { OnMount } from '@monaco-editor/react';
 import { CHANNELS } from '@/shared/constants';
 
@@ -16,6 +18,7 @@ function App() {
   const { selectedFile, unsavedFiles, setUnsavedFile, activeTabId, closeTab, tabs } = useFileStore(); // Updated Store
   const { addContextItem } = useContextStore();
   const { highlightTarget, setHighlightTarget } = useSearchStore();
+  const { activeView } = useViewStore();
   
   const [fileContent, setFileContent] = useState("// Welcome to The Hive");
   // const [isDirty, setIsDirty] = useState(false); // Removed local dirty state, use store
@@ -292,37 +295,43 @@ function App() {
          <Sidebar />
       </div>
 
-      {/* CENTER: Editor */}
+      {/* CENTER: Editor or Workflow */}
       <div className="flex-1 flex flex-col bg-[#1e1e1e] min-w-0">
-         {/* Tabs Bar */}
-         <TabBar />
-         
-         {/* Editor Area */}
-         <div className="flex-1 relative">
-            {selectedFile ? (
-                <Editor 
-                    height="100%" 
-                    language={language}
-                    theme="vs-dark"
-                    value={fileContent}
-                    onChange={handleFileChange}
-                    onMount={handleEditorDidMount}
-                    options={{
-                        minimap: { enabled: false },
-                        fontSize: 14,
-                        padding: { top: 16 },
-                        readOnly: false
-                    }}
-                />
-            ) : (
-                <div className="h-full flex items-center justify-center text-gray-600 select-none">
-                    <div className="text-center">
-                        <p className="text-xl font-semibold mb-2">The Hive</p>
-                        <p className="text-sm">Select a file to start editing</p>
-                    </div>
-                </div>
-            )}
-         </div>
+         {activeView === 'workflow' ? (
+             <WorkflowEditor />
+         ) : (
+             <>
+                 {/* Tabs Bar */}
+                 <TabBar />
+                 
+                 {/* Editor Area */}
+                 <div className="flex-1 relative">
+                    {selectedFile ? (
+                        <Editor 
+                            height="100%" 
+                            language={language}
+                            theme="vs-dark"
+                            value={fileContent}
+                            onChange={handleFileChange}
+                            onMount={handleEditorDidMount}
+                            options={{
+                                minimap: { enabled: false },
+                                fontSize: 14,
+                                padding: { top: 16 },
+                                readOnly: false
+                            }}
+                        />
+                    ) : (
+                        <div className="h-full flex items-center justify-center text-gray-600 select-none">
+                            <div className="text-center">
+                                <p className="text-xl font-semibold mb-2">The Hive</p>
+                                <p className="text-sm">Select a file to start editing</p>
+                            </div>
+                        </div>
+                    )}
+                 </div>
+             </>
+         )}
       </div>
 
       {/* RIGHT: Agent Chat */}
