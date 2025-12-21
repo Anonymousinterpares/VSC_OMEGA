@@ -13,17 +13,56 @@ const StatusIcon = ({ status }: { status: ITask['status'] }) => {
 };
 
 export const MissionStatus: React.FC = () => {
-  const { tasks, strictMode } = useTaskStore();
+  const { tasks, strictMode, startTime, endTime } = useTaskStore();
+  const [elapsed, setElapsed] = React.useState<string>("00:00");
 
-  if (tasks.length === 0) return null;
+  React.useEffect(() => {
+    if (!startTime) {
+        setElapsed("00:00");
+        return;
+    }
 
-  const progress = Math.round((tasks.filter(t => t.status === 'completed').length / tasks.length) * 100);
+    const updateTimer = () => {
+        const now = endTime || Date.now();
+        const diff = Math.max(0, now - startTime);
+        const seconds = Math.floor((diff / 1000) % 60);
+        const minutes = Math.floor((diff / (1000 * 60)) % 60);
+        const hours = Math.floor(diff / (1000 * 60 * 60));
+        
+        const fmt = (n: number) => n.toString().padStart(2, '0');
+        if (hours > 0) {
+            setElapsed(`${fmt(hours)}:${fmt(minutes)}:${fmt(seconds)}`);
+        } else {
+            setElapsed(`${fmt(minutes)}:${fmt(seconds)}`);
+        }
+    };
+
+    updateTimer();
+    
+    let interval: NodeJS.Timeout | null = null;
+    if (!endTime) {
+        interval = setInterval(updateTimer, 1000);
+    }
+
+    return () => {
+        if (interval) clearInterval(interval);
+    };
+  }, [startTime, endTime]);
+
+  if (tasks.length === 0 && !startTime) return null;
+
+  const progress = tasks.length > 0 
+      ? Math.round((tasks.filter(t => t.status === 'completed').length / tasks.length) * 100)
+      : 0;
 
   return (
     <div className="border-t border-gray-700 bg-[#1e1e1e] p-3 flex flex-col gap-2 shadow-lg">
       <div className="flex justify-between items-center text-xs text-gray-400 uppercase tracking-wider font-bold">
         <span>Mission Status</span>
-        <span>{progress}% Complete</span>
+        <div className="flex items-center gap-3">
+             <span className={`font-mono ${endTime ? 'text-green-500' : 'text-blue-400'}`}>{elapsed}</span>
+             <span>{progress}% Complete</span>
+        </div>
       </div>
 
       <div className="h-1 w-full bg-gray-700 rounded-full overflow-hidden">
@@ -34,7 +73,12 @@ export const MissionStatus: React.FC = () => {
       </div>
 
       <div className="max-h-32 overflow-y-auto space-y-1 mt-1 pr-1 custom-scrollbar">
-        {tasks.map((task) => (
+        {tasks.length === 0 ? (
+            <div className="text-gray-500 italic text-center p-2 text-xs">
+                Initializing mission parameters...
+            </div>
+        ) : (
+            tasks.map((task) => (
           <div key={task.id} className="flex items-center gap-2 text-sm p-1 hover:bg-[#2d2d2d] rounded">
             <StatusIcon status={task.status} />
             <span className={`flex-1 truncate ${task.status === 'completed' ? 'text-gray-500 line-through' : 'text-gray-200'}`}>
@@ -51,7 +95,7 @@ export const MissionStatus: React.FC = () => {
                 </span>
             )}
           </div>
-        ))}
+        )))}
       </div>
       
       {strictMode && (

@@ -288,7 +288,7 @@ export const ChatWindow: React.FC = () => {
   const [currentAgent, setCurrentAgent] = useState<string | null>(null);
   const [autoApply, setAutoApply] = useState(true);
   
-  const { strictMode, setStrictMode, setTasks } = useTaskStore();
+  const { strictMode, setStrictMode, setTasks, initiateMission } = useTaskStore();
   const autoMarkTasks = !strictMode;
   const setAutoMarkTasks = (val: boolean) => setStrictMode(!val);
   
@@ -375,6 +375,7 @@ export const ChatWindow: React.FC = () => {
       
       setIsThinking(true);
       setCurrentAgent(step.agent);
+      initiateMission(); // Start timer on retry
       try {
           // Send request to run ONLY this agent with the stored input
           const response = await window.electron.ipcRenderer.invoke(CHANNELS.TO_MAIN.SEND_MESSAGE, {
@@ -441,6 +442,7 @@ export const ChatWindow: React.FC = () => {
     setInput('');
     setIsThinking(true);
     setCurrentAgent('Router'); // Initial state
+    initiateMission(); // Start timer immediately
 
     // Add Placeholder Bot Message
     const botId = (Date.now() + 1).toString();
