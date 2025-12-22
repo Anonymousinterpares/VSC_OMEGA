@@ -142,6 +142,16 @@ app.whenReady().then(() => {
       return workflowService.redo();
   });
 
+  ipcMain.handle(CHANNELS.TO_MAIN.PAUSE_WORKFLOW, async () => {
+      orchestrator.pause();
+      return { success: true };
+  });
+
+  ipcMain.handle(CHANNELS.TO_MAIN.RESUME_WORKFLOW, async () => {
+      orchestrator.resume();
+      return { success: true };
+  });
+
   // Handle App Closing
   let isQuitting = false;
   mainWindow.on('close', (e) => {

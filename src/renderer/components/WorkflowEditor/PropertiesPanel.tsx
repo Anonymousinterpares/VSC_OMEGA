@@ -1,12 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { useWorkflowStore } from '../../store/useWorkflowStore';
-import { Save, RotateCcw } from 'lucide-react';
+import { useExecutionStore } from '../../store/useExecutionStore';
+import { Save, RotateCcw, Eye } from 'lucide-react';
+import { ContextViewer } from '../Modals/ContextViewer';
 
 export const PropertiesPanel: React.FC = () => {
   const { workflow, selectedAgentId, updateLocalAgent, updateRouterPrompt, saveWorkflow } = useWorkflowStore();
+  const { status, pausedContext } = useExecutionStore();
   const [localPrompt, setLocalPrompt] = useState('');
+  const [showContext, setShowContext] = useState(false);
   
   const isRouter = selectedAgentId === 'Router';
+  const canInspect = status === 'PAUSED' && pausedContext?.agent === selectedAgentId;
   
   const selectedAgent = React.useMemo(() => {
     if (!workflow) return null;
@@ -41,17 +46,6 @@ export const PropertiesPanel: React.FC = () => {
     } else {
         updateLocalAgent(selectedAgent.id, { systemPrompt: localPrompt });
     }
-    // Trigger global save
-    // We need to wait for state update to propagate before saving to disk, 
-    // but updateRouterPrompt updates store synchronously.
-    // However, we need to pass the *updated* workflow to saveWorkflow.
-    // The store's saveWorkflow takes an argument.
-    // Easier way: Store updates state, then we call save with new state?
-    // Actually, `updateLocalAgent` updates the store. We should call `saveWorkflow(updatedWorkflow)`
-    // But we don't have the updated object here easily.
-    // Let's rely on the store's `saveWorkflow` being called with the current store state
-    // OR, better, let the store handle auto-save or explicit save button in Toolbar.
-    // Here we just update local state.
   };
 
   // Auto-update store on blur
@@ -70,7 +64,18 @@ export const PropertiesPanel: React.FC = () => {
           <h2 className="text-white font-bold text-lg">{selectedAgent.name}</h2>
           <p className="text-slate-400 text-xs">{selectedAgent.role}</p>
         </div>
-        <div className="w-4 h-4 rounded-full" style={{ backgroundColor: selectedAgent.color }}></div>
+        <div className="flex items-center space-x-2">
+             {canInspect && (
+                 <button 
+                    onClick={() => setShowContext(true)}
+                    className="p-1.5 bg-amber-500 hover:bg-amber-400 text-white rounded-full shadow-lg animate-pulse"
+                    title="Inspect Pending Context"
+                 >
+                    <Eye size={16} />
+                 </button>
+             )}
+            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: selectedAgent.color }}></div>
+        </div>
       </div>
 
       <div className="p-4 flex-1 overflow-y-auto">
@@ -93,6 +98,10 @@ export const PropertiesPanel: React.FC = () => {
             </p>
         </div>
       </div>
+
+      {showContext && pausedContext && (
+          <ContextViewer data={pausedContext} onClose={() => setShowContext(false)} />
+      )}
     </div>
   );
 };

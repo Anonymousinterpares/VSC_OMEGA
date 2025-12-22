@@ -23,12 +23,16 @@ export const CHANNELS = {
     SAVE_WORKFLOW: 'save-workflow',
     RESET_WORKFLOW: 'reset-workflow',
     UNDO_WORKFLOW: 'undo-workflow',
-    REDO_WORKFLOW: 'redo-workflow'
+    REDO_WORKFLOW: 'redo-workflow',
+    PAUSE_WORKFLOW: 'pause-workflow',
+    RESUME_WORKFLOW: 'resume-workflow'
   },
   TO_RENDERER: {
         AGENT_STEP_UPDATE: 'agent:step-update',
         AGENT_CONTENT_UPDATE: 'agent:content-update',
         AGENT_STATUS_UPDATE: 'agent:status-update',
+        AGENT_PAUSED: 'agent:paused',
+        AGENT_RESUMED: 'agent:resumed',
         AGENT_TOKEN_UPDATE: 'agent:token-update',
         FOLDER_OPENED: 'file:folder-opened',
         FILE_READ: 'file:read',

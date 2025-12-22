@@ -43,6 +43,11 @@ export class AgentOrchestrator {
     agent: ''
   };
 
+  // Pause State
+  private isPaused = false;
+  private pausePromise: Promise<void> | null = null;
+  private pauseResolve: (() => void) | null = null;
+
   // Files modified or read during the session (Auto-Context)
   private projectWorkingSet = new Map<string, string>();
 
@@ -69,8 +74,46 @@ export class AgentOrchestrator {
     }
   }
 
+  public pause() {
+      this.isPaused = true;
+      if (!this.pausePromise) {
+          this.pausePromise = new Promise((resolve) => {
+              this.pauseResolve = resolve;
+          });
+      }
+      this.emitContent("\n\n[System: Workflow Paused...]\n");
+  }
+
+  public resume() {
+      this.isPaused = false;
+      if (this.pauseResolve) {
+          this.pauseResolve();
+          this.pauseResolve = null;
+          this.pausePromise = null;
+      }
+      this.emitContent("\n\n[System: Workflow Resumed]\n");
+  }
+
+  private async waitForResume() {
+      if (this.pausePromise) {
+          await this.pausePromise;
+      }
+  }
+
+  private emitPaused(contextData: any) {
+      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+          this.mainWindow.webContents.send(CHANNELS.TO_RENDERER.AGENT_PAUSED, contextData);
+      }
+  }
+
+  private emitResumed() {
+      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+          this.mainWindow.webContents.send(CHANNELS.TO_RENDERER.AGENT_RESUMED);
+      }
+  }
+
   private emitStats() {
-    if (!this.mainWindow) return;
+    if (!this.mainWindow || this.mainWindow.isDestroyed()) return;
 
     // Combine session + current
     const displayStats = {
@@ -95,7 +138,7 @@ export class AgentOrchestrator {
   }
 
   private emitPlan() {
-    if (this.mainWindow) {
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
       this.mainWindow.webContents.send(CHANNELS.TO_RENDERER.AGENT_PLAN_UPDATE, this.currentTasks);
     }
   }
@@ -178,19 +221,19 @@ export class AgentOrchestrator {
   }
 
   private emitSteps(steps: any[]) {
-    if (this.mainWindow) {
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
       this.mainWindow.webContents.send(CHANNELS.TO_RENDERER.AGENT_STEP_UPDATE, { steps });
     }
   }
 
   private emitContent(content: string) {
-    if (this.mainWindow) {
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
       this.mainWindow.webContents.send(CHANNELS.TO_RENDERER.AGENT_CONTENT_UPDATE, { content });
     }
   }
 
   private emitDelta(delta: string) {
-    if (this.mainWindow) {
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
       this.mainWindow.webContents.send(CHANNELS.TO_RENDERER.AGENT_CONTENT_UPDATE, { delta });
       
       // Live estimation
@@ -200,7 +243,7 @@ export class AgentOrchestrator {
   }
 
   private emitStatus(agent: string) {
-    if (this.mainWindow) {
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
       this.mainWindow.webContents.send(CHANNELS.TO_RENDERER.AGENT_STATUS_UPDATE, { agent });
     }
   }
@@ -234,6 +277,30 @@ export class AgentOrchestrator {
       // Refresh Context with latest file structure and session changes
       const freshTree = await this.fileSystem.getFileTree();
       formattedContext = this.contextManager.buildContextString(context?.activeContext, freshTree, this.projectWorkingSet);
+
+      if (this.isPaused) {
+          let previewSystemPrompt = "";
+          let previewInput = "";
+          
+          if (nextAgent === 'Router') {
+              previewSystemPrompt = workflow.routerPrompt;
+              previewInput = currentHistory;
+          } else if (nextAgent !== 'FINISH') {
+              const agentDef = this.workflowService.getAgent(nextAgent);
+              previewSystemPrompt = agentDef?.systemPrompt || "";
+              previewInput = currentInput;
+          }
+
+          this.emitPaused({
+              agent: nextAgent,
+              systemPrompt: previewSystemPrompt,
+              userHistory: previewInput,
+              fileContext: formattedContext
+          });
+
+          await this.waitForResume();
+          this.emitResumed();
+      }
 
       /* 
          REMOVED FORCE FINISH: 
@@ -280,6 +347,25 @@ export class AgentOrchestrator {
           steps.push({ agent: 'Router', input: 'Deciding next step...', output: `Selected: ${nextAgent}`, reasoning });
           this.emitSteps(steps);
           this.commitTurn();
+
+          // --- PAUSE CHECK AFTER ROUTER DECISION ---
+          if (this.isPaused && nextAgent !== 'FINISH') {
+               const agentDef = this.workflowService.getAgent(nextAgent);
+               const previewSystemPrompt = agentDef?.systemPrompt || "";
+               
+               // For the next agent, the input is the FULL history + task context
+               const previewInput = currentHistory + taskContext;
+
+               this.emitPaused({
+                  agent: nextAgent,
+                  systemPrompt: previewSystemPrompt,
+                  userHistory: previewInput,
+                  fileContext: formattedContext
+               });
+
+               await this.waitForResume();
+               this.emitResumed();
+          }
 
           if (nextAgent === 'FINISH') {
               const incompleteTasks = this.currentTasks.filter(t => t.status === 'pending' || t.status === 'in_progress');

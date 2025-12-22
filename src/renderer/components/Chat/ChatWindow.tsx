@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, ChevronDown, ChevronRight, Activity, Layers, RefreshCw, Square } from 'lucide-react';
+import { Send, ChevronDown, ChevronRight, Activity, Layers, RefreshCw, Square, Pause, Play } from 'lucide-react';
 import { CHANNELS } from '@/shared/constants';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { useFileStore } from '../../store/useFileStore';
@@ -8,6 +8,7 @@ import { IAgentMessage } from '@/shared/types';
 import { TaskVerification } from './TaskVerification';
 import { MissionStatus } from './MissionStatus';
 import { useTaskStore } from '../../store/useTaskStore';
+import { useExecutionStore } from '../../store/useExecutionStore';
 
 interface ITokenStats {
     totalInput: number;
@@ -305,6 +306,7 @@ export const ChatWindow: React.FC = () => {
   const { settings } = useSettingsStore();
   const { fileTree } = useFileStore();
   const { activeContext } = useContextStore();
+  const executionStatus = useExecutionStore(state => state.status);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -360,12 +362,24 @@ export const ChatWindow: React.FC = () => {
             setTasks(tasks);
         });
 
+        const removePausedListener = window.electron.ipcRenderer.on(CHANNELS.TO_RENDERER.AGENT_PAUSED, (contextData: any) => {
+             useExecutionStore.getState().setStatus('PAUSED');
+             useExecutionStore.getState().setPausedContext(contextData);
+        });
+
+        const removeResumedListener = window.electron.ipcRenderer.on(CHANNELS.TO_RENDERER.AGENT_RESUMED, () => {
+             useExecutionStore.getState().setStatus('RUNNING');
+             useExecutionStore.getState().setPausedContext(null);
+        });
+
           return () => {
               removeStepListener();
               removeContentListener();
               removeStatusListener();
               removeTokenListener();
               removePlanListener();
+              removePausedListener();
+              removeResumedListener();
           };
       }
   }, []);
@@ -505,6 +519,14 @@ export const ChatWindow: React.FC = () => {
     }
   };
 
+  const handlePause = async () => {
+      if (window.electron) await window.electron.ipcRenderer.invoke(CHANNELS.TO_MAIN.PAUSE_WORKFLOW);
+  };
+
+  const handleResume = async () => {
+      if (window.electron) await window.electron.ipcRenderer.invoke(CHANNELS.TO_MAIN.RESUME_WORKFLOW);
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -601,13 +623,32 @@ export const ChatWindow: React.FC = () => {
             onKeyDown={handleKeyDown}
           />
           {isThinking ? (
-            <button 
-              onClick={handleStop}
-              className="absolute bottom-2 right-2 p-1.5 bg-red-600 rounded-md text-white hover:bg-red-500 transition-colors"
-              title="Stop Generation"
-            >
-              <Square size={16} fill="currentColor" />
-            </button>
+            <div className="absolute bottom-2 right-2 flex space-x-1">
+                {executionStatus === 'PAUSED' ? (
+                     <button 
+                        onClick={handleResume}
+                        className="p-1.5 bg-green-600 rounded-md text-white hover:bg-green-500 transition-colors"
+                        title="Resume Workflow"
+                      >
+                        <Play size={16} fill="currentColor" />
+                      </button>
+                ) : (
+                      <button 
+                        onClick={handlePause}
+                        className="p-1.5 bg-yellow-600 rounded-md text-white hover:bg-yellow-500 transition-colors"
+                        title="Pause Workflow"
+                      >
+                        <Pause size={16} fill="currentColor" />
+                      </button>
+                )}
+                <button 
+                  onClick={handleStop}
+                  className="p-1.5 bg-red-600 rounded-md text-white hover:bg-red-500 transition-colors"
+                  title="Stop Generation"
+                >
+                  <Square size={16} fill="currentColor" />
+                </button>
+            </div>
           ) : (
             <button 
               onClick={handleSend}

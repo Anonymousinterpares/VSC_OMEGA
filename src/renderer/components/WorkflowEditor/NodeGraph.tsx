@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { useWorkflowStore } from '../../store/useWorkflowStore';
+import { useExecutionStore } from '../../store/useExecutionStore';
 import clsx from 'clsx';
 import { IAgentDefinition } from '../../../shared/workflowTypes';
 
@@ -9,9 +10,11 @@ const RADIUS = 200;
 
 export const NodeGraph: React.FC = () => {
   const { workflow, selectedAgentId, selectAgent } = useWorkflowStore();
+  const { status, pausedContext } = useExecutionStore();
 
   const agents = workflow?.agents || [];
   const routerNode = { id: 'Router', name: 'Router', color: '#6366f1' }; // Indigo
+  const pausedAgentId = status === 'PAUSED' ? pausedContext?.agent : null;
 
   const nodes = useMemo(() => {
     return agents.map((agent, index) => {
@@ -54,7 +57,8 @@ export const NodeGraph: React.FC = () => {
       <div 
         className={clsx(
             "absolute flex flex-col items-center justify-center w-32 h-32 rounded-full border-4 shadow-xl cursor-pointer transition-transform hover:scale-105 z-10",
-            selectedAgentId === 'Router' ? "border-white scale-110 shadow-indigo-500/50" : "border-indigo-500/50"
+            selectedAgentId === 'Router' ? "border-white scale-110 shadow-indigo-500/50" : "border-indigo-500/50",
+            pausedAgentId === 'Router' && "ring-4 ring-amber-500 animate-pulse"
         )}
         style={{ 
             top: CENTER_Y - 64, 
@@ -73,7 +77,8 @@ export const NodeGraph: React.FC = () => {
           key={node.id}
           className={clsx(
             "absolute flex flex-col items-center justify-center w-24 h-24 rounded-xl border-2 shadow-lg cursor-pointer transition-all hover:scale-105 hover:z-20",
-            selectedAgentId === node.id ? "border-white scale-110 shadow-white/20" : "border-transparent"
+            selectedAgentId === node.id ? "border-white scale-110 shadow-white/20" : "border-transparent",
+            pausedAgentId === node.id && "ring-4 ring-amber-500 animate-pulse"
           )}
           style={{
             top: node.y - 48,
