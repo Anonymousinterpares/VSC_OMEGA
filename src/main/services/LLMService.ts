@@ -40,8 +40,12 @@ export class LLMService {
                 setTimeout(() => reject(new Error("Request timed out")), 60000) // 60s timeout
             );
 
+            const contentPromise = model.generateContent(fullPrompt);
+            // Prevent unhandled rejection if timeout wins
+            contentPromise.catch(() => {});
+
             const result = await Promise.race([
-                model.generateContent(fullPrompt),
+                contentPromise,
                 timeoutPromise
             ]) as any;
 
@@ -91,7 +95,10 @@ export class LLMService {
             }
 
             // Race between next chunk and silence timeout
-            const chunkPromise = streamIterator.next();
+            const nextChunk = streamIterator.next();
+            // Attach a silent catch to prevent unhandled rejections if the timeout wins
+            nextChunk.catch(() => {}); 
+            
             const timeoutPromise = new Promise<IteratorResult<any>>((resolve) => {
                 timeoutId = setTimeout(() => {
                     console.log("[LLMService] Stream silence timeout (15s). Assuming completion.");
@@ -99,7 +106,7 @@ export class LLMService {
                 }, 15000); // 15s silence timeout
             });
 
-            const { done, value } = await Promise.race([chunkPromise, timeoutPromise]);
+            const { done, value } = await Promise.race([nextChunk, timeoutPromise]);
             
             if (timeoutId) clearTimeout(timeoutId);
 
