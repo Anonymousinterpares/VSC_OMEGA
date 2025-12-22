@@ -1,6 +1,7 @@
 import { BrowserWindow } from 'electron';
 import { LLMService } from '../services/LLMService';
 import { ToolHandler } from './ToolHandler';
+import { SettingsService } from '../services/SettingsService';
 import { FileSystemService } from '../services/FileSystem';
 import { ProposalManager } from '../services/ProposalManager';
 import { WorkflowService } from '../services/WorkflowService';
@@ -25,6 +26,7 @@ export class AgentOrchestrator {
   private fileSystem: FileSystemService;
   private tools: ToolHandler;
   private workflowService: WorkflowService;
+  private settingsService: SettingsService;
   private contextManager: ContextManager;
   private mainWindow: BrowserWindow | null;
   private currentTasks: ITask[] = [];
@@ -54,13 +56,15 @@ export class AgentOrchestrator {
   constructor(
       llm: LLMService, 
       fileSystem: FileSystemService, 
-      workflowService: WorkflowService, 
+      workflowService: WorkflowService,
+      settingsService: SettingsService,
       mainWindow: BrowserWindow | null, 
       proposalManager: ProposalManager
   ) {
     this.llm = llm;
     this.fileSystem = fileSystem;
     this.workflowService = workflowService;
+    this.settingsService = settingsService;
     this.mainWindow = mainWindow;
     this.proposalManager = proposalManager;
     this.tools = new ToolHandler(fileSystem, proposalManager);
@@ -250,6 +254,9 @@ export class AgentOrchestrator {
 
   async handleMessage(request: IOrchestratorRequest): Promise<IOrchestratorResponse> {
     const { message, context } = request;
+    const settings = await this.settingsService.getSettings();
+    const isSoloMode = settings.agenticMode === 'solo';
+
     const steps: { agent: string; input: string; output: string; reasoning?: string }[] = [];
     const autoApply = context?.autoApply ?? true;
     const autoMarkTasks = context?.autoMarkTasks ?? false;
@@ -263,12 +270,18 @@ export class AgentOrchestrator {
     // Build context with persistent working set via ContextManager
     let formattedContext = this.contextManager.buildContextString(context?.activeContext, context?.fileTree, this.projectWorkingSet);
 
-    let currentHistory = `User Request: ${message}`;
+    // PREPEND HISTORY: Format the previous messages so the agent sees the full conversation
+    const historyText = request.history && request.history.length > 0 
+        ? request.history.map(m => `[${m.role === 'user' ? 'User' : (m.agentName || 'System')}]: ${m.content}`).join('\n\n') + '\n\n'
+        : "";
+
+    let currentHistory = `${historyText}User Request: ${message}`;
     let loopCount = 0;
     const MAX_LOOPS = 15;
     let finalContent = "";
 
-    let nextAgent = 'Router';
+    // In Solo mode, start with 'Solo'. In Agentic, start with 'Router'.
+    let nextAgent = isSoloMode ? 'Solo' : 'Router';
     let currentInput = message;
 
     while (loopCount < MAX_LOOPS) {
@@ -310,8 +323,8 @@ export class AgentOrchestrator {
 
       loopCount++;
 
-      // PRIORITY: If any task awaits review, force Reviewer
-      if (this.currentTasks.some(t => t.status === 'review_pending') && nextAgent === 'Router') {
+      // PRIORITY: If any task awaits review, force Reviewer (ONLY IN AGENTIC MODE)
+      if (!isSoloMode && this.currentTasks.some(t => t.status === 'review_pending') && nextAgent === 'Router') {
           nextAgent = 'Reviewer';
       }
 
@@ -484,7 +497,7 @@ export class AgentOrchestrator {
           finalContent += agentOutput;
 
           if (signal.aborted) break;
-
+          
           // --- TASK STATUS PARSING ---
           const completedMatch = agentOutput.match(/\[COMPLETED:([^\]]+)\]/gi);
           const verifiedMatch = agentOutput.match(/\[VERIFIED:([^\]]+)\]/gi);
@@ -582,12 +595,39 @@ export class AgentOrchestrator {
             this.parseChecklist(agentOutput);
           }
 
-          currentHistory += `\n\n### ${nextAgent} Output:\n${agentOutput}`;
+          // Check for explicit [FINISH] token from Solo agent
+          if (isSoloMode && agentOutput.includes('[FINISH]')) {
+              nextAgent = 'FINISH';
+              finalContent += "\n\n[System: Solo Agent indicated completion.]\n";
+          } else {
+             // If not finishing, determine next step
+             if (isSoloMode) {
+                 nextAgent = 'Solo';
+                 // For Solo, we just append the output to history and let it run again
+             } else {
+                 nextAgent = 'Router';
+             }
+          }
 
-          steps.push({ agent: nextAgent, input: '...', output: agentOutput });
+          // --- SOLO MODE: FORCE STOP IF NO TOOLS USED (Plan Phase) ---
+          const hasToolTags = /<(write|read|replace)[^>]*>/i.test(agentOutput); 
+          if (isSoloMode && !hasToolTags && nextAgent !== 'FINISH') {
+              // This was likely a planning turn. Stop to let user confirm.
+              nextAgent = 'FINISH'; 
+              finalContent += "\n\n[System: Solo Agent awaiting user confirmation.]\n";
+          }
+
+          currentHistory += `\n\n### ${nextAgent === 'FINISH' && isSoloMode ? 'Solo' : (isSoloMode ? 'Solo' : nextAgent)} Output:\n${agentOutput}`;
+          if (isSoloMode) {
+              currentInput = currentHistory; // Keep feeding full history
+          }
+
+          steps.push({ agent: isSoloMode ? 'Solo' : nextAgent, input: '...', output: agentOutput });
           this.emitSteps(steps);
           this.commitTurn();
-          nextAgent = 'Router';
+          
+          // If we just finished via Solo token, break loop
+          if (nextAgent === 'FINISH') break;
 
         } catch (err: any) {
           if (err.message === 'Aborted by user') break;

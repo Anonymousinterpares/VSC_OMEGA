@@ -11,6 +11,7 @@ const defaultData: Data = {
   settings: {
     geminiApiKey: '',
     selectedModel: 'gemini-3-flash-preview',
+    agenticMode: 'agentic'
   }
 };
 

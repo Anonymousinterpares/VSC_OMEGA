@@ -53,7 +53,7 @@ app.whenReady().then(() => {
   llmService = new LLMService(settingsService);
   proposalManager = new ProposalManager(mainWindow);
   workflowService = new WorkflowService(process.cwd()); // Use CWD for workflow.json
-  orchestrator = new AgentOrchestrator(llmService, fileSystemService, workflowService, mainWindow, proposalManager);
+  orchestrator = new AgentOrchestrator(llmService, fileSystemService, workflowService, settingsService, mainWindow, proposalManager);
 
   // IPC Handlers
   ipcMain.on(CHANNELS.TO_MAIN.OPEN_FOLDER, () => fileSystemService.handleOpenFolder());

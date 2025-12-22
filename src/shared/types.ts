@@ -49,7 +49,8 @@ export interface ITask {
 
 export interface IAppSettings {
   geminiApiKey: string;
-  selectedModel: 'gemini-3-pro-preview' | 'gemini-3-flash-preview';
+  selectedModel: string;
+  agenticMode: 'agentic' | 'solo';
 }
 
 export interface ISearchMatch {

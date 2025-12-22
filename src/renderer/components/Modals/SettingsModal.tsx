@@ -6,6 +6,7 @@ export const SettingsModal: React.FC = () => {
   const { settings, isOpen, toggleModal, saveSettings, loadSettings } = useSettingsStore();
   const [apiKey, setApiKey] = useState(settings.geminiApiKey);
   const [model, setModel] = useState(settings.selectedModel);
+  const [mode, setMode] = useState(settings.agenticMode || 'agentic');
 
   useEffect(() => {
     if (isOpen) {
@@ -14,12 +15,13 @@ export const SettingsModal: React.FC = () => {
             const current = useSettingsStore.getState().settings;
             setApiKey(current.geminiApiKey);
             setModel(current.selectedModel);
+            setMode(current.agenticMode || 'agentic');
         });
     }
   }, [isOpen]);
 
   const handleSave = async () => {
-    await saveSettings({ geminiApiKey: apiKey, selectedModel: model });
+    await saveSettings({ geminiApiKey: apiKey, selectedModel: model, agenticMode: mode });
     toggleModal();
   };
 
@@ -57,6 +59,26 @@ export const SettingsModal: React.FC = () => {
               <option value="gemini-3-flash-preview">Gemini 3 Flash Preview</option>
               <option value="gemini-3-pro-preview">Gemini 3 Pro Preview</option>
             </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">Agent Mode</label>
+            <div className="flex gap-2">
+                <button
+                    onClick={() => setMode('agentic')}
+                    className={`flex-1 py-2 px-3 rounded border ${mode === 'agentic' ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:bg-gray-800'}`}
+                >
+                    <div className="font-bold text-sm">Swarm</div>
+                    <div className="text-xs opacity-75">Multi-Agent</div>
+                </button>
+                <button
+                    onClick={() => setMode('solo')}
+                    className={`flex-1 py-2 px-3 rounded border ${mode === 'solo' ? 'bg-purple-600 border-purple-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:bg-gray-800'}`}
+                >
+                    <div className="font-bold text-sm">Solo</div>
+                    <div className="text-xs opacity-75">Full-Stack Dev</div>
+                </button>
+            </div>
           </div>
 
           <div className="flex justify-end pt-2">

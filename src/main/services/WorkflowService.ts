@@ -89,6 +89,40 @@ OUTPUT FORMAT (JSON):
   "suggestions": "Optional text for the Coder if rejected"
 }`;
 
+const SOLO_PROMPT = `You are an autonomous Senior Full-Stack Developer.
+You are responsible for the ENTIRE lifecycle of the task: Analysis, Planning, Implementation, and Verification.
+
+### PROCESS (Strictly Sequential)
+**CRITICAL INSTRUCTION**: Before acting, REVIEW THE CHAT HISTORY.
+- If you have *already* presented a plan and the user has just said "Proceed", "Confirmed", or "Go ahead", **SKIP PHASE 1**. Immediately start **PHASE 2**.
+- Do NOT re-state the plan. Do NOT re-analyze. Just Start Coding.
+
+1. **PHASE 1: ANALYSIS & PLANNING** (Only if no plan exists yet)
+   - Analyze the user's request and the codebase.
+   - Create a detailed, step-by-step plan/checklist.
+   - **STOP** and present this plan to the user. Ask for confirmation to proceed.
+   - Do NOT execute any code changes in this phase.
+
+2. **PHASE 2: EXECUTION (After User Confirmation)**
+   - Once the user says "Proceed" or confirms the plan:
+   - Execute the plan step-by-step using tools.
+   - Use <read_file>, <write_file>, or <replace>.
+   - Focus on one or two files per turn to ensure quality.
+
+3. **PHASE 3: VERIFICATION & FINISH**
+   - Check your work.
+   - When the task is fully complete and functional, output the token **[FINISH]**.
+
+### TOOLS
+- <read_file>path/to/file</read_file>
+- <write_file path="path/to/file">...content...</write_file>
+- <replace path="path/to/file"><old>...</old><new>...</new></replace>
+
+### RULES
+- **Do NOT** start coding until the user confirms your plan.
+- Be precise.
+- ALWAYS output **[FINISH]** when you are done.`;
+
 const ROUTER_PROMPT = `You are the Workflow Orchestrator. You decide the next step based on the conversation history and the CURRENT PLAN STATUS.
 
 STATE MACHINE & RULES:
@@ -116,7 +150,8 @@ const DEFAULT_AGENTS: IAgentDefinition[] = [
     { id: 'Planner', name: 'Planner', role: 'Technical Lead', color: '#a855f7', systemPrompt: PLANNER_PROMPT, description: 'Creates executable checklists.', capabilities: [] },
     { id: 'Coder', name: 'Coder', role: 'Software Engineer', color: '#22c55e', systemPrompt: CODER_PROMPT, description: 'Writes and modifies code.', capabilities: ['write_file', 'replace', 'read_file'] },
     { id: 'QA', name: 'QA', role: 'QA Engineer', color: '#f97316', systemPrompt: QA_PROMPT, description: 'Validates code and finds defects.', capabilities: [] },
-    { id: 'Reviewer', name: 'Reviewer', role: 'Principal Architect', color: '#ef4444', systemPrompt: REVIEWER_PROMPT, description: 'Performs final code review.', capabilities: [] }
+    { id: 'Reviewer', name: 'Reviewer', role: 'Principal Architect', color: '#ef4444', systemPrompt: REVIEWER_PROMPT, description: 'Performs final code review.', capabilities: [] },
+    { id: 'Solo', name: 'Solo Dev', role: 'Full Stack Developer', color: '#8b5cf6', systemPrompt: SOLO_PROMPT, description: 'Autonomous agent that handles all tasks.', capabilities: ['write_file', 'replace', 'read_file'] }
 ];
 
 export class WorkflowService {
