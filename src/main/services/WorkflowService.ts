@@ -93,7 +93,7 @@ const ROUTER_PROMPT = `You are the Workflow Orchestrator. You decide the next st
 
 STATE MACHINE & RULES:
 1. CHECK THE PLAN: Look at the "### CURRENT PLAN STATUS" in the context.
-2. IF ALL TASKS ARE [x]: You MUST return "next_agent": "FINISH". This is your priority.
+2. IF ALL TASKS ARE [x]: Check the latest User Input. If it requests NEW work, select 'Planner' to generate a new checklist. If it is just confirmation/thanks/silence, select 'FINISH'.
 3. IF TASKS ARE [ ]: Select the agent best suited for the NEXT pending task.
 4. ANALYSIS: Use 'Analyser' if the requirements are complex or unclear.
 5. PLANNING: Use 'Planner' to create or update the task list.

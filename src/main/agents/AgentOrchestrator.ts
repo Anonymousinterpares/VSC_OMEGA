@@ -235,13 +235,11 @@ export class AgentOrchestrator {
       const freshTree = await this.fileSystem.getFileTree();
       formattedContext = this.contextManager.buildContextString(context?.activeContext, freshTree, this.projectWorkingSet);
 
-      // Force finish if all tasks are done
-      if (this.currentTasks.length > 0 && this.currentTasks.every(t => t.status === 'completed')) {
-        const finishMsg = `\n\n### ✅ All tasks completed. Finishing workflow.`;
-        finalContent += finishMsg;
-        this.emitContent(finalContent);
-        nextAgent = 'FINISH';
-      }
+      /* 
+         REMOVED FORCE FINISH: 
+         Rely on Router to decide. If we force finish here, new user inputs are ignored 
+         if the previous tasks remain in the 'completed' state.
+      */
 
       loopCount++;
 
@@ -283,7 +281,25 @@ export class AgentOrchestrator {
           this.emitSteps(steps);
           this.commitTurn();
 
-          if (nextAgent === 'FINISH') break;
+          if (nextAgent === 'FINISH') {
+              const incompleteTasks = this.currentTasks.filter(t => t.status === 'pending' || t.status === 'in_progress');
+              if (incompleteTasks.length > 0) {
+                  // INTERCEPT: Tasks are not done, but Router wants to finish.
+                  nextAgent = 'QA';
+                  const verificationPrompt = `\n\n[SYSTEM INTERRUPT]: The Router signaled to FINISH, but the following tasks are still marked as incomplete in the system:\n${incompleteTasks.map(t => `- ${t.id}: ${t.description}`).join('\n')}\n\nReview the conversation history above.\n1. If these tasks were actually completed by the Coder/Agent, output "**[COMPLETED: Task ID]**" for each.\n2. If they were NOT completed, list what is missing and provide a brief plan to finish them.\n3. If they are invalid, mark them as "**[REJECTED: Task ID]**".`;
+                  
+                  // We append this to the current history context so the QA agent sees it as the immediate trigger
+                  currentHistory += verificationPrompt;
+                  
+                  // Also inform the user via UI
+                  const interceptMsg = `\n\n### 🛡️ Verifying Task Completion...\n*Router wanted to finish, but ${incompleteTasks.length} tasks are pending. Asking QA to verify.*`;
+                  finalContent += interceptMsg;
+                  this.emitContent(finalContent);
+
+              } else {
+                  break;
+              }
+          }
 
           this.emitStatus(nextAgent);
           currentInput = currentHistory + taskContext;
@@ -505,6 +521,7 @@ export class AgentOrchestrator {
   }
 
   private parseChecklist(text: string) {
+    console.log("Orchestrator: Parsing checklist from Planner output...");
     const strictRegex = /- \[ \] \*\*(Task \d+:)\*\* (.*?)(?:\*Verify by:\* (.*))?$/gm;
     const looseRegex = /^(?:-|\d+\.)\s*(?:[\s]*\[\s*\]\s*)?(?:\*\*)?(Task\s*\d+:)?(?:\*\*)?\s*(.*?)$/gm;
 
@@ -533,12 +550,33 @@ export class AgentOrchestrator {
       }
     }
 
+    console.log(`Orchestrator: Found ${newTasks.length} tasks.`);
+
     if (newTasks.length > 0) {
       // Merge with existing tasks to preserve status if ID exists
       if (this.currentTasks.length > 0) {
           const merged = newTasks.map(newTask => {
-              const existing = this.currentTasks.find(t => t.id === newTask.id || t.description === newTask.description);
-              return existing ? { ...newTask, status: existing.status } : newTask;
+              // Match primarily on ID
+              const existing = this.currentTasks.find(t => t.id === newTask.id);
+              
+              if (existing) {
+                  // Only preserve status if the description is substantially the same.
+                  // If the description changed, it's likely a new task with reused ID -> Reset to pending.
+                  if (existing.description.trim() === newTask.description.trim()) {
+                      return { ...newTask, status: existing.status };
+                  } else {
+                      const pendingStatus: ITask['status'] = 'pending';
+                      return { ...newTask, status: pendingStatus };
+                  }
+              }
+              
+              // Fallback: If no ID match, check description match (unlikely but safe)
+              const existingByDesc = this.currentTasks.find(t => t.description === newTask.description);
+              if (existingByDesc) {
+                   return { ...newTask, status: existingByDesc.status };
+              }
+
+              return newTask;
           });
           this.currentTasks = merged;
       } else {
