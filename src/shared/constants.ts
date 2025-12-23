@@ -25,7 +25,10 @@ export const CHANNELS = {
     UNDO_WORKFLOW: 'undo-workflow',
     REDO_WORKFLOW: 'redo-workflow',
     PAUSE_WORKFLOW: 'pause-workflow',
-    RESUME_WORKFLOW: 'resume-workflow'
+    RESUME_WORKFLOW: 'resume-workflow',
+    
+    // Terminal
+    KILL_PROCESS: 'terminal:kill-process'
   },
   TO_RENDERER: {
         AGENT_STEP_UPDATE: 'agent:step-update',
@@ -41,6 +44,14 @@ export const CHANNELS = {
         PROPOSE_CHANGE: 'proposal:change',
         REQUEST_TASK_CONFIRMATION: 'proposal:task-confirmation',
         DIRTY_CHECK_REQUEST: 'app:dirty-check-request',
-        AGENT_PLAN_UPDATE: 'agent:plan-update'
+        AGENT_PLAN_UPDATE: 'agent:plan-update',
+        
+        // Terminal
+        TERMINAL: {
+            START: 'terminal:start',
+            OUTPUT: 'terminal:output',
+            STOP: 'terminal:stop',
+            KILLED: 'terminal:killed'
+        }
     }
 };

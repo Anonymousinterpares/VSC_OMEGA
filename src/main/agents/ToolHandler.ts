@@ -1,8 +1,11 @@
 import { FileSystemService } from '../services/FileSystem';
 import { ProposalManager } from '../services/ProposalManager';
+import { spawn, ChildProcessWithoutNullStreams } from 'child_process';
+import { CHANNELS } from '../../shared/constants';
+import { BrowserWindow } from 'electron';
 
 export interface IToolAction {
-    type: 'write' | 'read' | 'replace';
+    type: 'write' | 'read' | 'replace' | 'execute';
     path: string;
 }
 
@@ -21,13 +24,132 @@ export interface ISingleToolResult {
 export class ToolHandler {
   private fileSystem: FileSystemService;
   private proposalManager: ProposalManager;
+  private mainWindow: BrowserWindow | null = null;
+  private activeProcess: ChildProcessWithoutNullStreams | null = null;
 
-  constructor(fileSystem: FileSystemService, proposalManager: ProposalManager) {
+  constructor(fileSystem: FileSystemService, proposalManager: ProposalManager, mainWindow?: BrowserWindow) {
     this.fileSystem = fileSystem;
     this.proposalManager = proposalManager;
+    if (mainWindow) this.mainWindow = mainWindow;
+  }
+
+  public setMainWindow(window: BrowserWindow) {
+      this.mainWindow = window;
+  }
+
+  public killActiveProcess() {
+      if (this.activeProcess) {
+          this.activeProcess.kill();
+          this.activeProcess = null;
+          if (this.mainWindow) {
+              this.mainWindow.webContents.send(CHANNELS.TO_RENDERER.TERMINAL.KILLED);
+          }
+      }
   }
 
   // --- Atomic Execution Methods ---
+
+  async executeCommand(command: string, autoApply: boolean): Promise<ISingleToolResult> {
+      // 1. Ask for permission (or check autoApply)
+      if (!autoApply) {
+          const result = await this.proposalManager.requestApproval({
+              id: Date.now().toString(),
+              type: 'command',
+              path: command,
+              original: '',
+              modified: command
+          });
+          if (result.status !== 'accepted') {
+               return {
+                  llmOutput: `\n[System] User REJECTED command: ${command}`,
+                  userOutput: `\n[System] User REJECTED command: ${command}`,
+                  action: null
+              };
+          }
+      }
+
+      // 2. Start Execution
+      return new Promise<ISingleToolResult>((resolve) => {
+          let stdoutData = "";
+          let stderrData = "";
+          const cwd = this.fileSystem.getProjectRoot() || undefined;
+
+          // Notify Renderer: Start
+          if (this.mainWindow) {
+              this.mainWindow.webContents.send(CHANNELS.TO_RENDERER.TERMINAL.START, { command, cwd });
+          }
+
+          try {
+            // Split command into cmd + args for spawn
+            // Basic splitting that handles quotes is complex, falling back to shell: true for now
+            // which mimics 'exec' behavior but allows streaming.
+            const child = spawn(command, { 
+                cwd,
+                shell: true 
+            });
+
+            this.activeProcess = child;
+
+            child.stdout.on('data', (data) => {
+                const str = data.toString();
+                stdoutData += str;
+                if (this.mainWindow) {
+                    this.mainWindow.webContents.send(CHANNELS.TO_RENDERER.TERMINAL.OUTPUT, { type: 'stdout', data: str });
+                }
+            });
+
+            child.stderr.on('data', (data) => {
+                const str = data.toString();
+                stderrData += str;
+                if (this.mainWindow) {
+                    this.mainWindow.webContents.send(CHANNELS.TO_RENDERER.TERMINAL.OUTPUT, { type: 'stderr', data: str });
+                }
+            });
+
+            child.on('error', (err) => {
+                 const errorMsg = err.message;
+                 stderrData += errorMsg;
+                 if (this.mainWindow) {
+                     this.mainWindow.webContents.send(CHANNELS.TO_RENDERER.TERMINAL.OUTPUT, { type: 'stderr', data: errorMsg });
+                     this.mainWindow.webContents.send(CHANNELS.TO_RENDERER.TERMINAL.STOP, { code: 1 });
+                 }
+                 this.activeProcess = null;
+                 resolve({
+                      llmOutput: `\n[System] Error starting command: ${command}\nError: ${errorMsg}`,
+                      userOutput: `\n[System] Error starting command: ${command}`,
+                      action: null
+                 });
+            });
+
+            child.on('close', (code) => {
+                this.activeProcess = null;
+                if (this.mainWindow) {
+                    this.mainWindow.webContents.send(CHANNELS.TO_RENDERER.TERMINAL.STOP, { code });
+                }
+
+                const output = stdoutData + (stderrData ? `\n[STDERR]\n${stderrData}` : '');
+                const statusMsg = code === 0 ? "Successfully executed" : `Failed with exit code ${code}`;
+                
+                resolve({
+                    llmOutput: `\n[System] Command executed: ${command}\nExit Code: ${code}\nOutput:\n${output}`,
+                    userOutput: `\n[System] ${statusMsg}: ${command}`,
+                    action: { type: 'execute', path: command }
+                });
+            });
+
+          } catch (e: any) {
+              this.activeProcess = null;
+               if (this.mainWindow) {
+                   this.mainWindow.webContents.send(CHANNELS.TO_RENDERER.TERMINAL.STOP, { code: 1 });
+               }
+               resolve({
+                  llmOutput: `\n[System] Exception executing command: ${command}\n${e.message}`,
+                  userOutput: `\n[System] Exception executing command: ${command}`,
+                  action: null
+              });
+          }
+      });
+  }
 
   async executeWrite(path: string, content: string, autoApply: boolean): Promise<ISingleToolResult> {
       try {

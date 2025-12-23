@@ -152,6 +152,11 @@ app.whenReady().then(() => {
       return { success: true };
   });
 
+  // Terminal Handlers
+  ipcMain.on(CHANNELS.TO_MAIN.KILL_PROCESS, () => {
+      orchestrator.killActiveProcess();
+  });
+
   // Handle App Closing
   let isQuitting = false;
   mainWindow.on('close', (e) => {

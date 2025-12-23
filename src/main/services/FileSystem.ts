@@ -160,6 +160,10 @@ export class FileSystemService {
     return await this.readDirectory(this.projectRoot);
   }
 
+  getProjectRoot(): string | null {
+      return this.projectRoot;
+  }
+
   async handleSearch(options: ISearchOptions): Promise<ISearchResult[]> {
     if (!this.projectRoot) {
         return [];

@@ -67,7 +67,7 @@ export class AgentOrchestrator {
     this.settingsService = settingsService;
     this.mainWindow = mainWindow;
     this.proposalManager = proposalManager;
-    this.tools = new ToolHandler(fileSystem, proposalManager);
+    this.tools = new ToolHandler(fileSystem, proposalManager, mainWindow || undefined);
     this.contextManager = new ContextManager();
   }
 
@@ -96,6 +96,10 @@ export class AgentOrchestrator {
           this.pausePromise = null;
       }
       this.emitContent("\n\n[System: Workflow Resumed]\n");
+  }
+
+  public killActiveProcess() {
+      this.tools.killActiveProcess();
   }
 
   private async waitForResume() {
@@ -453,6 +457,7 @@ export class AgentOrchestrator {
             const writeMatch = /<write_file path="([^"]+)">([\s\S]*?)<\/write_file>/.exec(streamBuffer);
             const replaceMatch = /<replace path="([^"]+)">\s*<old>([\s\S]*?)<\/old>\s*<new>([\s\S]*?)<\/new>\s*<\/replace>/.exec(streamBuffer);
             const readMatch = /<read_file>(.*?)<\/read_file>/.exec(streamBuffer);
+            const execMatch = /<execute_command>(.*?)<\/execute_command>/.exec(streamBuffer);
 
             let toolExecuted = false;
             let result = null;
@@ -483,6 +488,11 @@ export class AgentOrchestrator {
                        this.projectWorkingSet.set(path, fullContent);
                    } catch (e) { /* ignore */ }
                 }
+                streamBuffer = streamBuffer.replace(fullMatch, "");
+                toolExecuted = true;
+            } else if (execMatch) {
+                const [fullMatch, command] = execMatch;
+                result = await this.tools.executeCommand(command, autoApply);
                 streamBuffer = streamBuffer.replace(fullMatch, "");
                 toolExecuted = true;
             }

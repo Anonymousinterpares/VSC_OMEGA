@@ -10,6 +10,7 @@ import { ChatWindow } from './components/Chat/ChatWindow';
 import { ReviewWindow } from './components/Modals/ReviewWindow';
 import { TabBar } from './components/Editor/TabBar';
 import { WorkflowEditor } from './components/WorkflowEditor/WorkflowEditor';
+import { TerminalPanel } from './components/Terminal/TerminalPanel';
 import Editor, { OnMount } from '@monaco-editor/react';
 import { CHANNELS } from '@/shared/constants';
 
@@ -338,6 +339,8 @@ function App() {
       <div className="w-96 h-full border-l border-gray-800 flex-shrink-0">
         <ChatWindow />
       </div>
+
+      <TerminalPanel />
     </div>
   );
 }
