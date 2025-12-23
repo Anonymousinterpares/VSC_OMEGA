@@ -50,6 +50,7 @@ new string to replace it with
 4. EXECUTE: <execute_command>command</execute_command> (e.g., npm test, ls -la, node script.js)
    - Use this to verify your code or run diagnostics.
    - Output will be returned to you.
+   - **Long-Running Processes:** Use <execute_command background="true">npm run dev</execute_command> for servers/watchers.
 
 ### INSTRUCTIONS
 1. Analyze the 'Plan' and 'Original Request'.
@@ -137,7 +138,7 @@ You are responsible for the ENTIRE lifecycle of the task: Analysis, Planning, Im
 - <read_file>path/to/file</read_file>
 - <write_file path="path/to/file">...content...</write_file>
 - <replace path="path/to/file"><old>...</old><new>...</new></replace>
-- <execute_command>command</execute_command> (e.g., npm test, ls -la)
+- <execute_command>command</execute_command> OR <execute_command background="true">long_running_command</execute_command>
 
 ### RULES
 - **Do NOT** start coding until the user confirms your plan.

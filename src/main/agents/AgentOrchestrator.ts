@@ -457,7 +457,7 @@ export class AgentOrchestrator {
             const writeMatch = /<write_file path="([^"]+)">([\s\S]*?)<\/write_file>/.exec(streamBuffer);
             const replaceMatch = /<replace path="([^"]+)">\s*<old>([\s\S]*?)<\/old>\s*<new>([\s\S]*?)<\/new>\s*<\/replace>/.exec(streamBuffer);
             const readMatch = /<read_file>(.*?)<\/read_file>/.exec(streamBuffer);
-            const execMatch = /<execute_command>(.*?)<\/execute_command>/.exec(streamBuffer);
+            const execMatch = /<execute_command(?:\s+background=["'](true|false)["'])?>([\s\S]*?)<\/execute_command>/.exec(streamBuffer);
 
             let toolExecuted = false;
             let result = null;
@@ -491,8 +491,18 @@ export class AgentOrchestrator {
                 streamBuffer = streamBuffer.replace(fullMatch, "");
                 toolExecuted = true;
             } else if (execMatch) {
-                const [fullMatch, command] = execMatch;
-                result = await this.tools.executeCommand(command, autoApply);
+                const [fullMatch, bgAttr, commandContent] = execMatch;
+                // If background attribute is missing, bgAttr will be undefined.
+                // commandContent is the second capture group in the new regex.
+                // However, wait: the capture group index depends on if bgAttr matched.
+                // Regex: /<execute_command(?:\s+background=["'](true|false)["'])?>([\s\S]*?)<\/execute_command>/
+                // Group 1: (true|false) OR undefined
+                // Group 2: Content
+                
+                const isBackground = bgAttr === 'true';
+                const command = commandContent.trim();
+                
+                result = await this.tools.executeCommand(command, autoApply, isBackground);
                 streamBuffer = streamBuffer.replace(fullMatch, "");
                 toolExecuted = true;
             }

@@ -49,13 +49,13 @@ export class ToolHandler {
 
   // --- Atomic Execution Methods ---
 
-  async executeCommand(command: string, autoApply: boolean): Promise<ISingleToolResult> {
+  async executeCommand(command: string, autoApply: boolean, isBackground = false): Promise<ISingleToolResult> {
       // 1. Ask for permission (or check autoApply)
       if (!autoApply) {
           const result = await this.proposalManager.requestApproval({
               id: Date.now().toString(),
               type: 'command',
-              path: command,
+              path: command + (isBackground ? ' (background)' : ''),
               original: '',
               modified: command
           });
@@ -80,15 +80,37 @@ export class ToolHandler {
           }
 
           try {
-            // Split command into cmd + args for spawn
-            // Basic splitting that handles quotes is complex, falling back to shell: true for now
-            // which mimics 'exec' behavior but allows streaming.
             const child = spawn(command, { 
                 cwd,
                 shell: true 
             });
 
             this.activeProcess = child;
+
+            // BACKGROUND MODE: Resolve immediately (after small delay to check for immediate crash)
+            if (isBackground) {
+                setTimeout(() => {
+                    // If process is already dead (exitCode not null), report it
+                    if (child.exitCode !== null) {
+                         const output = stdoutData + (stderrData ? `\n[STDERR]\n${stderrData}` : '');
+                         resolve({
+                            llmOutput: `\n[System] Background process exited immediately. Exit Code: ${child.exitCode}\nOutput:\n${output}`,
+                            userOutput: `\n[System] Background process failed: ${command}`,
+                            action: { type: 'execute', path: command }
+                        });
+                        this.activeProcess = null; // Clean up
+                    } else {
+                        // Still running - Resolve "Success" so Agent proceeds
+                        resolve({
+                            llmOutput: `\n[System] Command started in background (PID: ${child.pid}).\nOutput will stream to the User Terminal.\n[NOTE] You can proceed with other tasks while this runs.`,
+                            userOutput: `\n[System] Started background process: ${command}`,
+                            action: { type: 'execute', path: command }
+                        });
+                        // Note: activeProcess remains set, so 'Stop' button still works for this background task.
+                        // Future improvement: Support multiple background pids.
+                    }
+                }, 2000);
+            }
 
             child.stdout.on('data', (data) => {
                 const str = data.toString();
@@ -114,11 +136,9 @@ export class ToolHandler {
                      this.mainWindow.webContents.send(CHANNELS.TO_RENDERER.TERMINAL.STOP, { code: 1 });
                  }
                  this.activeProcess = null;
-                 resolve({
-                      llmOutput: `\n[System] Error starting command: ${command}\nError: ${errorMsg}`,
-                      userOutput: `\n[System] Error starting command: ${command}`,
-                      action: null
-                 });
+                 
+                 // If background, we might have already resolved. 
+                 // But typically 'error' fires on spawn fail.
             });
 
             child.on('close', (code) => {
@@ -127,14 +147,17 @@ export class ToolHandler {
                     this.mainWindow.webContents.send(CHANNELS.TO_RENDERER.TERMINAL.STOP, { code });
                 }
 
-                const output = stdoutData + (stderrData ? `\n[STDERR]\n${stderrData}` : '');
-                const statusMsg = code === 0 ? "Successfully executed" : `Failed with exit code ${code}`;
-                
-                resolve({
-                    llmOutput: `\n[System] Command executed: ${command}\nExit Code: ${code}\nOutput:\n${output}`,
-                    userOutput: `\n[System] ${statusMsg}: ${command}`,
-                    action: { type: 'execute', path: command }
-                });
+                // If NOT background, we resolve here.
+                if (!isBackground) {
+                    const output = stdoutData + (stderrData ? `\n[STDERR]\n${stderrData}` : '');
+                    const statusMsg = code === 0 ? "Successfully executed" : `Failed with exit code ${code}`;
+                    
+                    resolve({
+                        llmOutput: `\n[System] Command executed: ${command}\nExit Code: ${code}\nOutput:\n${output}`,
+                        userOutput: `\n[System] ${statusMsg}: ${command}`,
+                        action: { type: 'execute', path: command }
+                    });
+                }
             });
 
           } catch (e: any) {

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { CHANNELS } from '../../../shared/constants';
+import { AnsiRenderer } from './AnsiRenderer';
 
 interface TerminalMessage {
     type: 'stdout' | 'stderr' | 'info';
@@ -122,7 +123,7 @@ export const TerminalPanel: React.FC = () => {
                             msg.type === 'info' ? 'text-blue-400 font-bold' : 
                             'text-gray-300'
                         }>
-                            {msg.text}
+                            <AnsiRenderer text={msg.text} />
                         </span>
                     ))}
                     <div ref={bottomRef} />
