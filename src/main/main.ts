@@ -108,6 +108,11 @@ app.whenReady().then(() => {
       return await orchestrator.compressHistory(messages);
   });
 
+  ipcMain.handle(CHANNELS.TO_MAIN.RESET_SESSION, async () => {
+      orchestrator.reset();
+      return { success: true };
+  });
+
   // Handle Review Decisions from UI
   ipcMain.handle(CHANNELS.TO_MAIN.REVIEW_DECISION, async (_, { id, status, content }) => {
       proposalManager.resolveProposal(id, status, content);

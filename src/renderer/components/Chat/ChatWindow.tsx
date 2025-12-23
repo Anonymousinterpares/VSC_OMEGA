@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, ChevronDown, ChevronRight, Activity, Layers, RefreshCw, Square, Pause, Play } from 'lucide-react';
+import { Send, ChevronDown, ChevronRight, Activity, Layers, RefreshCw, Square, Pause, Play, PlusCircle } from 'lucide-react';
 import { CHANNELS } from '@/shared/constants';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { useFileStore } from '../../store/useFileStore';
@@ -314,6 +314,23 @@ export const ChatWindow: React.FC = () => {
     }
   }, [messages]);
 
+  const handleResetChat = async () => {
+      if (!window.electron) return;
+      
+      const confirm = window.confirm("Are you sure you want to start a new task? This will clear current conversation history and task progress.");
+      if (!confirm) return;
+
+      setMessages([]);
+      resetTasks();
+      setTokenStats({
+          totalInput: 0,
+          totalOutput: 0,
+          currentContextSize: 0,
+          agentStats: {}
+      });
+      await window.electron.ipcRenderer.invoke(CHANNELS.TO_MAIN.RESET_SESSION);
+  };
+
   // Streaming & Stats Listener
   useEffect(() => {
       if (window.electron) {
@@ -541,7 +558,16 @@ export const ChatWindow: React.FC = () => {
     <div className="flex flex-col h-full bg-gray-900 border-l border-gray-800">
       {/* Header */}
       <div className="p-3 border-b border-gray-800 flex justify-between items-center bg-gray-900">
-        <span className="font-semibold text-gray-200">Agent Chat</span>
+        <div className="flex items-center space-x-2">
+            <span className="font-semibold text-gray-200">Agent Chat</span>
+            <button 
+                onClick={handleResetChat}
+                className="p-1 hover:bg-gray-800 rounded text-gray-500 hover:text-blue-400 transition-colors"
+                title="Start New Task (Reset Conversation)"
+            >
+                <PlusCircle size={16} />
+            </button>
+        </div>
         <div className="flex items-center space-x-4">
             <label className="flex items-center space-x-2 cursor-pointer group" title="When disabled, you will be asked to confirm task completion">
                 <input 

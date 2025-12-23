@@ -15,6 +15,7 @@ export const CHANNELS = {
     SEND_MESSAGE: 'send-message',
     ABORT_WORKFLOW: 'abort-workflow',
     COMPRESS_CONTEXT: 'compress-context',
+    RESET_SESSION: 'reset-session',
     REVIEW_DECISION: 'review-decision',
     TASK_CONFIRMATION_DECISION: 'task-confirmation-decision',
 

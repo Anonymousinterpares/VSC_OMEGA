@@ -105,6 +105,19 @@ export class AgentOrchestrator {
       this.tools.killActiveProcess();
   }
 
+  public reset() {
+      this.currentTasks = [];
+      this.sessionStats = {
+          totalInput: 0,
+          totalOutput: 0,
+          currentContextSize: 0,
+          agentStats: {}
+      };
+      this.projectWorkingSet.clear();
+      this.emitPlan();
+      this.emitStats();
+  }
+
   private async waitForResume() {
       if (this.pausePromise) {
           await this.pausePromise;
