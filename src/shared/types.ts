@@ -32,6 +32,20 @@ export interface IAgentState {
   history: IAgentMessage[];
 }
 
+export type AgentPhase = 
+  | 'IDLE'
+  | 'PREPARING_CONTEXT' 
+  | 'WAITING_FOR_API' 
+  | 'STREAMING' 
+  | 'EXECUTING_TOOL' 
+  | 'ANALYZING';
+
+export interface IAgentStatus {
+  phase: AgentPhase;
+  details?: string; // e.g. "npm install" or "Waiting 4.2s..."
+  timestamp: number;
+}
+
 export interface IFileNode {
   name: string;
   path: string;

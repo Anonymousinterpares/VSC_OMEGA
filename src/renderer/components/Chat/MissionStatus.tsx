@@ -1,5 +1,38 @@
 import React from 'react';
 import { useTaskStore, ITask } from '../../store/useTaskStore';
+import { useExecutionStore } from '../../store/useExecutionStore';
+import { AgentPhase } from '../../../shared/types';
+import { Loader2, Server, Terminal, FileCode, BrainCircuit, Play } from 'lucide-react';
+
+const PhaseIndicator = () => {
+  const { agentPhase, phaseDetails } = useExecutionStore();
+
+  if (agentPhase === 'IDLE') return null;
+
+  const getPhaseConfig = (phase: AgentPhase) => {
+    switch (phase) {
+      case 'PREPARING_CONTEXT': return { icon: FileCode, color: 'text-yellow-400', label: 'Preparing Context' };
+      case 'WAITING_FOR_API': return { icon: Server, color: 'text-blue-400', label: 'Waiting for API' };
+      case 'STREAMING': return { icon: BrainCircuit, color: 'text-purple-400', label: 'Thinking...' };
+      case 'EXECUTING_TOOL': return { icon: Terminal, color: 'text-green-400', label: 'Executing Tool' };
+      case 'ANALYZING': return { icon: Loader2, color: 'text-orange-400', label: 'Analyzing Output' };
+      default: return { icon: Play, color: 'text-gray-400', label: 'Processing' };
+    }
+  };
+
+  const config = getPhaseConfig(agentPhase);
+  const Icon = config.icon;
+
+  return (
+    <div className="flex items-center gap-2 p-2 bg-gray-800 rounded mb-2 border border-gray-700 text-xs shadow-sm animate-in fade-in slide-in-from-top-1 duration-200">
+       <Icon className={`w-3.5 h-3.5 ${config.color} ${agentPhase === 'WAITING_FOR_API' || agentPhase === 'ANALYZING' ? 'animate-spin' : ''}`} />
+       <div className="flex flex-col min-w-0">
+          <span className={`font-bold ${config.color} leading-none mb-0.5`}>{config.label}</span>
+          {phaseDetails && <span className="text-gray-400 truncate leading-none">{phaseDetails}</span>}
+       </div>
+    </div>
+  );
+};
 
 const StatusIcon = ({ status }: { status: ITask['status'] }) => {
   switch (status) {
@@ -71,6 +104,8 @@ export const MissionStatus: React.FC = () => {
           style={{ width: `${progress}%` }}
         />
       </div>
+      
+      <PhaseIndicator />
 
       <div className="max-h-32 overflow-y-auto space-y-1 mt-1 pr-1 custom-scrollbar">
         {tasks.length === 0 ? (

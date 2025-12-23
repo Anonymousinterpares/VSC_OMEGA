@@ -259,10 +259,22 @@ export class AgentOrchestrator {
     }
   }
 
+  private emitPhase(phase: any, details?: string) {
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.webContents.send(CHANNELS.TO_RENDERER.AGENT_PHASE_UPDATE, { 
+        phase, 
+        details, 
+        timestamp: Date.now() 
+      });
+    }
+  }
+
   async handleMessage(request: IOrchestratorRequest): Promise<IOrchestratorResponse> {
     const { message, context } = request;
     const settings = await this.settingsService.getSettings();
     const isSoloMode = settings.agenticMode === 'solo';
+
+    this.emitPhase('PREPARING_CONTEXT', 'Reading files and building context...');
 
     const steps: { agent: string; input: string; output: string; reasoning?: string }[] = [];
     const autoApply = context?.autoApply ?? true;
@@ -351,7 +363,14 @@ export class AgentOrchestrator {
 
         let routerResponse = "";
         try {
-          const stream = this.llm.generateCompletionStream(routerSystemPrompt, routerInput, formattedContext, signal, (usage) => this.updateStats(usage, 'Router'));
+          const stream = this.llm.generateCompletionStream(
+              routerSystemPrompt, 
+              routerInput, 
+              formattedContext, 
+              signal, 
+              (usage) => this.updateStats(usage, 'Router'),
+              (phase, details) => this.emitPhase(phase, details)
+          );
           for await (const chunk of stream) {
             if (signal.aborted) break;
             routerResponse += chunk;
@@ -439,7 +458,14 @@ export class AgentOrchestrator {
         let agentOutput = "";
 
         try {
-          const stream = this.llm.generateCompletionStream(agentSystemPrompt, currentInput, formattedContext, signal, (usage) => this.updateStats(usage, nextAgent));
+          const stream = this.llm.generateCompletionStream(
+              agentSystemPrompt, 
+              currentInput, 
+              formattedContext, 
+              signal, 
+              (usage) => this.updateStats(usage, nextAgent),
+              (phase, details) => this.emitPhase(phase, details)
+          );
 
           let turnHeader = "";
           if (finalContent !== "") turnHeader = `\n\n--- Next Step: ${nextAgent} ---\n\n`;
@@ -477,12 +503,14 @@ export class AgentOrchestrator {
 
             if (writeMatch) {
                 const [fullMatch, path, content] = writeMatch;
+                this.emitPhase('EXECUTING_TOOL', `Writing file: ${path}`);
                 result = await this.tools.executeWrite(path, content, autoApply);
                 this.projectWorkingSet.set(path, content);
                 streamBuffer = streamBuffer.replace(fullMatch, ""); 
                 toolExecuted = true;
             } else if (replaceMatch) {
                 const [fullMatch, path, oldStr, newStr] = replaceMatch;
+                this.emitPhase('EXECUTING_TOOL', `Patching file: ${path}`);
                 result = await this.tools.executeReplace(path, oldStr, newStr, autoApply);
                 if (result) {
                    try {
@@ -494,6 +522,7 @@ export class AgentOrchestrator {
                 toolExecuted = true;
             } else if (readMatch) {
                 const [fullMatch, path] = readMatch;
+                this.emitPhase('EXECUTING_TOOL', `Reading file: ${path}`);
                 result = await this.tools.executeRead(path);
                 if (result) {
                    try {
@@ -515,12 +544,14 @@ export class AgentOrchestrator {
                 const isBackground = bgAttr === 'true';
                 const command = commandContent.trim();
                 
+                this.emitPhase('EXECUTING_TOOL', `Running: ${command}`);
                 result = await this.tools.executeCommand(command, autoApply, isBackground);
                 streamBuffer = streamBuffer.replace(fullMatch, "");
                 toolExecuted = true;
             }
 
             if (toolExecuted && result) {
+                this.emitPhase('ANALYZING', 'Processing tool output...');
                 const toolMsg = `\n\n[System Tool Output]:\n${result.userOutput}`;
                 finalContent += toolMsg;
                 this.emitDelta(toolMsg);

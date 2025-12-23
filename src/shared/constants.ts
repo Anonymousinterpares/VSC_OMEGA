@@ -34,6 +34,7 @@ export const CHANNELS = {
         AGENT_STEP_UPDATE: 'agent:step-update',
         AGENT_CONTENT_UPDATE: 'agent:content-update',
         AGENT_STATUS_UPDATE: 'agent:status-update',
+        AGENT_PHASE_UPDATE: 'agent:phase-update',
         AGENT_PAUSED: 'agent:paused',
         AGENT_RESUMED: 'agent:resumed',
         AGENT_TOKEN_UPDATE: 'agent:token-update',

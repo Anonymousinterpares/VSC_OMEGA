@@ -4,6 +4,7 @@ import { useFileStore } from './store/useFileStore';
 import { useContextStore } from './store/useContextStore';
 import { useSearchStore } from './store/useSearchStore';
 import { useViewStore } from './store/useViewStore';
+import { useExecutionStore } from './store/useExecutionStore';
 import { SettingsModal } from './components/Modals/SettingsModal';
 import { Sidebar } from './components/Sidebar/Sidebar';
 import { ChatWindow } from './components/Chat/ChatWindow';
@@ -20,6 +21,7 @@ function App() {
   const { addContextItem } = useContextStore();
   const { highlightTarget, setHighlightTarget } = useSearchStore();
   const { activeView } = useViewStore();
+  const { setAgentPhase } = useExecutionStore();
   
   const [fileContent, setFileContent] = useState("// Welcome to The Hive");
   // const [isDirty, setIsDirty] = useState(false); // Removed local dirty state, use store
@@ -102,6 +104,16 @@ function App() {
           }, 50);
       }
   }, [highlightTarget, fileContent, selectedFile]); 
+
+  // Agent Phase Listener
+  useEffect(() => {
+    if (window.electron) {
+      const removeListener = window.electron.ipcRenderer.on(CHANNELS.TO_RENDERER.AGENT_PHASE_UPDATE, (data: { phase: any, details: string }) => {
+          setAgentPhase(data.phase, data.details);
+      });
+      return () => removeListener();
+    }
+  }, []);
 
   // Live File Update Listener
   useEffect(() => {
