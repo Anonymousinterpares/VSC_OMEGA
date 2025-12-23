@@ -475,6 +475,8 @@ export const ChatWindow: React.FC = () => {
     try {
         let responseContent = "I am in browser mode. Connect to Electron for AI.";
         
+        console.log("Frontend: Sending message. Current History Length:", messages.length);
+
         if (window.electron) {
             // Send to backend
             const response = await window.electron.ipcRenderer.invoke(CHANNELS.TO_MAIN.SEND_MESSAGE, {
@@ -485,7 +487,8 @@ export const ChatWindow: React.FC = () => {
                     activeContext: activeContext,
                     autoApply: autoApply,
                     autoMarkTasks: autoMarkTasks
-                }
+                },
+                history: messages // Pass existing history
             });
             responseContent = response.content;
             

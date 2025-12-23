@@ -94,9 +94,9 @@ app.whenReady().then(() => {
     return await settingsService.saveSettings(newSettings);
   });
 
-  ipcMain.handle(CHANNELS.TO_MAIN.SEND_MESSAGE, async (_, { agent, message, context }) => {
+  ipcMain.handle(CHANNELS.TO_MAIN.SEND_MESSAGE, async (_, { agent, message, context, history }) => {
       // Route through Orchestrator
-      return await orchestrator.handleMessage({ agent, message, context });
+      return await orchestrator.handleMessage({ agent, message, context, history });
   });
 
   ipcMain.handle(CHANNELS.TO_MAIN.ABORT_WORKFLOW, async () => {

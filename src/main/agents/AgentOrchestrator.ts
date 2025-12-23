@@ -271,13 +271,14 @@ export class AgentOrchestrator {
     let formattedContext = this.contextManager.buildContextString(context?.activeContext, context?.fileTree, this.projectWorkingSet);
 
     // PREPEND HISTORY: Format the previous messages so the agent sees the full conversation
+    console.log(`[Orchestrator] Received history items: ${request.history?.length || 0}`);
     const historyText = request.history && request.history.length > 0 
         ? request.history.map(m => `[${m.role === 'user' ? 'User' : (m.agentName || 'System')}]: ${m.content}`).join('\n\n') + '\n\n'
         : "";
 
     let currentHistory = `${historyText}User Request: ${message}`;
     let loopCount = 0;
-    const MAX_LOOPS = 15;
+    const MAX_LOOPS = 30;
     let finalContent = "";
 
     // In Solo mode, start with 'Solo'. In Agentic, start with 'Router'.
@@ -610,7 +611,7 @@ export class AgentOrchestrator {
           }
 
           // --- SOLO MODE: FORCE STOP IF NO TOOLS USED (Plan Phase) ---
-          const hasToolTags = /<(write|read|replace)[^>]*>/i.test(agentOutput); 
+          const hasToolTags = /<(write|read|replace|search|list_directory|glob)[^>]*>/i.test(agentOutput); 
           if (isSoloMode && !hasToolTags && nextAgent !== 'FINISH') {
               // This was likely a planning turn. Stop to let user confirm.
               nextAgent = 'FINISH'; 
