@@ -3,7 +3,7 @@ import { CHANNELS } from '../../shared/constants';
 
 export interface IProposal {
     id: string;
-    type: 'new' | 'edit';
+    type: 'new' | 'edit' | 'command';
     path: string;
     original: string;
     modified: string;

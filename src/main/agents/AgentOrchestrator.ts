@@ -6,6 +6,7 @@ import { FileSystemService } from '../services/FileSystem';
 import { ProposalManager } from '../services/ProposalManager';
 import { WorkflowService } from '../services/WorkflowService';
 import { ContextManager } from '../services/ContextManager';
+import { LoopHandler } from '../services/LoopHandler';
 import { CHANNELS } from '../../shared/constants';
 import { ITask } from '../../shared/types';
 
@@ -28,6 +29,7 @@ export class AgentOrchestrator {
   private workflowService: WorkflowService;
   private settingsService: SettingsService;
   private contextManager: ContextManager;
+  private loopHandler: LoopHandler;
   private mainWindow: BrowserWindow | null;
   private currentTasks: ITask[] = [];
   private proposalManager: ProposalManager;
@@ -69,6 +71,7 @@ export class AgentOrchestrator {
     this.proposalManager = proposalManager;
     this.tools = new ToolHandler(fileSystem, proposalManager, mainWindow || undefined);
     this.contextManager = new ContextManager();
+    this.loopHandler = new LoopHandler();
   }
 
   public stop() {
@@ -450,6 +453,16 @@ export class AgentOrchestrator {
           for await (const chunk of stream) {
             if (signal.aborted) break;
             agentOutput += chunk;
+
+            const loopResult = this.loopHandler.analyze(agentOutput);
+            if (loopResult.isLooping) {
+               console.log(`[Orchestrator] Loop Detected! Trimming output.`);
+               agentOutput = agentOutput.slice(0, loopResult.trimIndex);
+               agentOutput += "\n\n[SYSTEM INTERVENTION: Loop detected. You were oscillating between verification steps. Stop verifying. Execute the plan immediately based on your findings above.]";
+               this.emitDelta("\n\n⚡ [SYSTEM: Loop detected - Interrupting...]\n");
+               break; 
+            }
+
             streamBuffer += chunk;
             this.emitDelta(chunk);
 
