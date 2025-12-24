@@ -162,6 +162,10 @@ app.whenReady().then(() => {
       orchestrator.killActiveProcess();
   });
 
+  ipcMain.on(CHANNELS.TO_MAIN.TERMINAL_INPUT, (_, { data }) => {
+      orchestrator.writeToProcess(data);
+  });
+
   // Handle App Closing
   let isQuitting = false;
   mainWindow.on('close', (e) => {

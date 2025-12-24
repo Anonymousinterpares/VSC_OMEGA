@@ -14,6 +14,7 @@ export const TerminalPanel: React.FC = () => {
     const [activeCommand, setActiveCommand] = useState<string | null>(null);
     const [isRunning, setIsRunning] = useState(false);
     const bottomRef = useRef<HTMLDivElement>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         if (!window.electron) return;
@@ -27,6 +28,8 @@ export const TerminalPanel: React.FC = () => {
                 { type: 'info', text: `> ${data.command}`, timestamp: Date.now() },
                 { type: 'info', text: `  (cwd: ${data.cwd || 'root'})`, timestamp: Date.now() }
             ]);
+            // Auto-focus the terminal for input
+            setTimeout(() => containerRef.current?.focus(), 100);
         };
 
         const onOutput = (data: { type: 'stdout' | 'stderr', data: string }) => {
@@ -80,11 +83,35 @@ export const TerminalPanel: React.FC = () => {
         setIsVisible(false);
     };
 
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (!isRunning) return;
+        
+        // Prevent default only for specific keys if needed, but usually we want to capture everything
+        // For basic terminal emulation, just send the key.
+        // Special handling for Enter?
+        let key = e.key;
+        if (key === 'Enter') key = '\n';
+        if (key === 'Backspace') key = '\b';
+        // Ignore modifier keys alone
+        if (['Shift', 'Control', 'Alt', 'Meta'].includes(key)) return;
+
+        // If Ctrl+C, maybe handle locally or send special signal?
+        // For now, let's just send the key char if possible.
+        // Actually, just sending the key value is simplest for 'q', 'a', etc.
+        
+        if (window.electron) {
+            window.electron.ipcRenderer.send(CHANNELS.TO_MAIN.TERMINAL_INPUT, { data: key });
+        }
+    };
+
     if (!isVisible && messages.length === 0) return null;
 
     return (
         <div 
-            className={`fixed bottom-0 left-80 right-96 bg-black border-t border-gray-700 transition-all duration-300 flex flex-col shadow-2xl z-50 ${isVisible ? 'h-64' : 'h-8'}`}
+            ref={containerRef}
+            tabIndex={0}
+            onKeyDown={handleKeyDown}
+            className={`fixed bottom-0 left-80 right-96 bg-black border-t border-gray-700 transition-all duration-300 flex flex-col shadow-2xl z-50 outline-none ${isVisible ? 'h-64' : 'h-8'} ${isRunning ? 'focus:border-blue-500' : ''}`}
         >
             {/* Header */}
             <div className="flex items-center justify-between px-3 h-8 bg-gray-800 border-b border-gray-700 select-none">

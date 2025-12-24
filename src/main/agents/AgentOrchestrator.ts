@@ -2,6 +2,7 @@ import { BrowserWindow } from 'electron';
 import { LLMService } from '../services/LLMService';
 import { ToolHandler } from './ToolHandler';
 import { SettingsService } from '../services/SettingsService';
+import { WebBrowserService } from '../services/WebBrowserService';
 import { FileSystemService } from '../services/FileSystem';
 import { ProposalManager } from '../services/ProposalManager';
 import { WorkflowService } from '../services/WorkflowService';
@@ -69,7 +70,11 @@ export class AgentOrchestrator {
     this.settingsService = settingsService;
     this.mainWindow = mainWindow;
     this.proposalManager = proposalManager;
-    this.tools = new ToolHandler(fileSystem, proposalManager, mainWindow || undefined);
+    
+    // Instantiate dependencies
+    const browserService = new WebBrowserService(settingsService);
+    this.tools = new ToolHandler(fileSystem, proposalManager, browserService, llm, mainWindow || undefined);
+    
     this.contextManager = new ContextManager();
     this.loopHandler = new LoopHandler();
   }
@@ -103,6 +108,10 @@ export class AgentOrchestrator {
 
   public killActiveProcess() {
       this.tools.killActiveProcess();
+  }
+
+  public writeToProcess(data: string) {
+      this.tools.writeToProcess(data);
   }
 
   public reset() {
@@ -510,6 +519,11 @@ export class AgentOrchestrator {
             const replaceMatch = /<replace path="([^"]+)">\s*<old>([\s\S]*?)<\/old>\s*<new>([\s\S]*?)<\/new>\s*<\/replace>/.exec(streamBuffer);
             const readMatch = /<read_file>(.*?)<\/read_file>/.exec(streamBuffer);
             const execMatch = /<execute_command(?:\s+background=["'](true|false)["'])?>([\s\S]*?)<\/execute_command>/.exec(streamBuffer);
+            
+            // Asset Designer Matches
+            const genImageMatch = /<generate_image\s+prompt="([^"]+)"(?:\s+aspect_ratio="([^"]+)")?\s*\/>/.exec(streamBuffer);
+            const resizeImageMatch = /<resize_image\s+path="([^"]+)"\s+width=(\d+)\s+height=(\d+)(?:\s+format="([^"]+)")?\s*\/>/.exec(streamBuffer);
+            const saveAssetMatch = /<save_asset\s+src="([^"]+)"\s+dest="([^"]+)"\s*\/>/.exec(streamBuffer);
 
             let toolExecuted = false;
             let result = null;
@@ -547,18 +561,29 @@ export class AgentOrchestrator {
                 toolExecuted = true;
             } else if (execMatch) {
                 const [fullMatch, bgAttr, commandContent] = execMatch;
-                // If background attribute is missing, bgAttr will be undefined.
-                // commandContent is the second capture group in the new regex.
-                // However, wait: the capture group index depends on if bgAttr matched.
-                // Regex: /<execute_command(?:\s+background=["'](true|false)["'])?>([\s\S]*?)<\/execute_command>/
-                // Group 1: (true|false) OR undefined
-                // Group 2: Content
-                
                 const isBackground = bgAttr === 'true';
                 const command = commandContent.trim();
                 
                 this.emitPhase('EXECUTING_TOOL', `Running: ${command}`);
                 result = await this.tools.executeCommand(command, autoApply, isBackground);
+                streamBuffer = streamBuffer.replace(fullMatch, "");
+                toolExecuted = true;
+            } else if (genImageMatch) {
+                const [fullMatch, prompt, ar] = genImageMatch;
+                this.emitPhase('EXECUTING_TOOL', 'Generating Image (Nano Banana Pro)...');
+                result = await this.tools.executeGenerateImage(prompt, ar);
+                streamBuffer = streamBuffer.replace(fullMatch, "");
+                toolExecuted = true;
+            } else if (resizeImageMatch) {
+                const [fullMatch, path, w, h, fmt] = resizeImageMatch;
+                this.emitPhase('EXECUTING_TOOL', `Resizing image to ${w}x${h}...`);
+                result = await this.tools.executeResizeImage(path, parseInt(w), parseInt(h), fmt);
+                streamBuffer = streamBuffer.replace(fullMatch, "");
+                toolExecuted = true;
+            } else if (saveAssetMatch) {
+                const [fullMatch, src, dest] = saveAssetMatch;
+                this.emitPhase('EXECUTING_TOOL', `Saving asset to ${dest}...`);
+                result = await this.tools.executeSaveAsset(src, dest);
                 streamBuffer = streamBuffer.replace(fullMatch, "");
                 toolExecuted = true;
             }

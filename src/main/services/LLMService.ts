@@ -1,12 +1,64 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { SettingsService } from "./SettingsService";
 import { AgentPhase } from "../../shared/types";
+import * as fs from 'fs-extra';
+import * as path from 'path';
 
 export class LLMService {
   private settingsService: SettingsService;
 
   constructor(settingsService: SettingsService) {
     this.settingsService = settingsService;
+  }
+
+  private async processContent(prompt: string): Promise<Array<string | { inlineData: { mimeType: string, data: string } }>> {
+    const parts: Array<string | { inlineData: { mimeType: string, data: string } }> = [];
+    const imageRegex = /\{\{IMAGE:(.*?)\}\}/g;
+    
+    let lastIndex = 0;
+    let match;
+
+    while ((match = imageRegex.exec(prompt)) !== null) {
+        // Add text before the image
+        if (match.index > lastIndex) {
+            parts.push(prompt.substring(lastIndex, match.index));
+        }
+
+        const imagePath = match[1];
+        try {
+            if (await fs.pathExists(imagePath)) {
+                const data = await fs.readFile(imagePath);
+                const base64Data = data.toString('base64');
+                // Simple mime type detection
+                const ext = imagePath.split('.').pop()?.toLowerCase();
+                let mimeType = 'image/jpeg';
+                if (ext === 'png') mimeType = 'image/png';
+                if (ext === 'webp') mimeType = 'image/webp';
+                if (ext === 'heic') mimeType = 'image/heic';
+                if (ext === 'heif') mimeType = 'image/heif';
+
+                parts.push({
+                    inlineData: {
+                        mimeType,
+                        data: base64Data
+                    }
+                });
+            } else {
+                parts.push(`[SYSTEM ERROR: Image not found at ${imagePath}]`);
+            }
+        } catch (e) {
+            parts.push(`[SYSTEM ERROR: Failed to load image at ${imagePath}]`);
+        }
+
+        lastIndex = imageRegex.lastIndex;
+    }
+
+    // Add remaining text
+    if (lastIndex < prompt.length) {
+        parts.push(prompt.substring(lastIndex));
+    }
+
+    return parts;
   }
 
   async generateCompletion(systemPrompt: string, userMessage: string, context: string, onUsage?: (usage: any) => void, onStatus?: (phase: AgentPhase, details?: string) => void): Promise<string> {
@@ -30,6 +82,8 @@ export class LLMService {
 
     console.log(`[LLMService] Sending Prompt: ${fullPrompt.length} chars. Context: ${context.length} chars.`);
 
+    const contentParts = await this.processContent(fullPrompt);
+
     let attempts = 0;
     const maxAttempts = 3;
 
@@ -38,7 +92,6 @@ export class LLMService {
         try {
             const model = genAI.getGenerativeModel({ model: settings.selectedModel });
             
-            const startTime = Date.now();
             if (onStatus) onStatus('WAITING_FOR_API', `Request sent. Waiting...`);
 
             // Create a timeout promise
@@ -46,7 +99,7 @@ export class LLMService {
                 setTimeout(() => reject(new Error("Request timed out")), 60000) // 60s timeout
             );
 
-            const contentPromise = model.generateContent(fullPrompt);
+            const contentPromise = model.generateContent(contentParts as any);
             // Prevent unhandled rejection if timeout wins
             contentPromise.catch(() => {});
 
@@ -65,10 +118,57 @@ export class LLMService {
         } catch (error: any) {
             attempts++;
             if (onStatus) onStatus('WAITING_FOR_API', `Error detected. Retrying (${attempts}/${maxAttempts})...`);
-            // ... (rest of error handling)
+            console.error(`Gemini API Error (Attempt ${attempts}):`, error);
+            if (attempts >= maxAttempts) {
+                return `ERROR: Gemini API failed after ${maxAttempts} attempts. ${error.message}`;
+            }
+            await new Promise(resolve => setTimeout(resolve, 2000 * attempts)); // Exponential backoff
         }
     }
     return "ERROR: Unknown error in LLMService.";
+  }
+
+  async generateImage(prompt: string, aspectRatio: string = "1:1"): Promise<string> {
+      const settings = await this.settingsService.getSettings();
+      if (!settings.geminiApiKey) {
+          throw new Error("API Key not found.");
+      }
+
+      const genAI = new GoogleGenerativeAI(settings.geminiApiKey);
+      // Using the user-specified Nano Banana Pro model ID
+      const model = genAI.getGenerativeModel({ model: "gemini-3-pro-image-preview" });
+
+      try {
+          // Append aspect ratio to prompt as a directive
+          const finalPrompt = `${prompt} (Aspect Ratio: ${aspectRatio})`;
+          
+          const result = await model.generateContent({
+              contents: [{ role: 'user', parts: [{ text: finalPrompt }] }],
+              generationConfig: {
+                  // Note: Aspect ratio and other params might vary by model version
+                  // but we pass the prompt as the core instruction.
+                  // For Imagen 3, the prompt IS the generation command.
+              }
+          } as any);
+
+          // The response usually contains the image as a part or in the candidate
+          const response = await result.response;
+          const part = response.candidates?.[0]?.content?.parts?.[0];
+
+          if (part && 'inlineData' in part && part.inlineData && part.inlineData.data) {
+              const buffer = Buffer.from(part.inlineData.data, 'base64');
+              const tempDir = path.join(process.cwd(), '.gemini', 'tmp', 'generated');
+              await fs.ensureDir(tempDir);
+              const filePath = path.join(tempDir, `gen_${Date.now()}.png`);
+              await fs.writeFile(filePath, buffer);
+              return filePath;
+          }
+
+          throw new Error("No image data returned from model.");
+      } catch (error: any) {
+          console.error("Image Generation Error:", error);
+          throw new Error(`Nano Banana Pro Generation failed: ${error.message}`);
+      }
   }
 
   async *generateCompletionStream(systemPrompt: string, userMessage: string, context: string, signal?: AbortSignal, onUsage?: (usage: any) => void, onStatus?: (phase: AgentPhase, details?: string) => void): AsyncGenerator<string, void, unknown> {
@@ -92,6 +192,8 @@ export class LLMService {
 
     console.log(`[LLMService] Streaming Prompt: ${fullPrompt.length} chars.`);
 
+    const contentParts = await this.processContent(fullPrompt);
+
     const genAI = new GoogleGenerativeAI(settings.geminiApiKey);
     try {
         const model = genAI.getGenerativeModel({ model: settings.selectedModel });
@@ -99,7 +201,7 @@ export class LLMService {
         const startTime = Date.now();
         if (onStatus) onStatus('WAITING_FOR_API', 'Request sent. Waiting for first token...');
 
-        const result = await model.generateContentStream(fullPrompt);
+        const result = await model.generateContentStream(contentParts as any);
         const streamIterator = result.stream[Symbol.asyncIterator]();
         
         let timeoutId: NodeJS.Timeout | null = null;

@@ -3,6 +3,9 @@ import * as fs from 'fs-extra';
 import * as path from 'path';
 
 // Default Prompts (Hardcoded fallback)
+import { RESEARCHER_PROMPT } from '../agents/definitions/04_Researcher';
+import { ASSET_DESIGNER_PROMPT } from '../agents/definitions/05_AssetDesigner';
+
 const ANALYSER_PROMPT = `You are an expert Systems Analyst. Your goal is to dissect complex coding/logic problems into atomic components.
 
 PROTOCOL:
@@ -139,6 +142,9 @@ You are responsible for the ENTIRE lifecycle of the task: Analysis, Planning, Im
 - <write_file path="path/to/file">...content...</write_file>
 - <replace path="path/to/file"><old>...</old><new>...</new></replace>
 - <execute_command>command</execute_command> OR <execute_command background="true">long_running_command</execute_command>
+- <web_search query="..." />
+- <visit_page url="..." />
+- <download_image url="..." />
 
 ### RULES
 - **Do NOT** start coding until the user confirms your plan.
@@ -153,8 +159,10 @@ STATE MACHINE & RULES:
 3. IF TASKS ARE [ ]: Select the agent best suited for the NEXT pending task.
 4. ANALYSIS: Use 'Analyser' if the requirements are complex or unclear.
 5. PLANNING: Use 'Planner' to create or update the task list.
-6. CODING: Use 'Coder' for file modifications or tool use.
-7. VERIFICATION: Use 'QA' or 'Reviewer' to verify code changes before finishing.
+6. RESEARCH: Use 'Researcher' if the task requires web searching or data extraction.
+7. ASSETS: Use 'AssetDesigner' for generating, resizing, or processing images/sprites using Nano Banana Pro.
+8. CODING: Use 'Coder' for file modifications or tool use.
+9. VERIFICATION: Use 'QA' or 'Reviewer' to verify code changes before finishing.
 
 MONITORING:
 - Agents might output "[COMPLETED: Task X]". Use this to track progress even if the status list isn't updated yet.
@@ -162,7 +170,7 @@ MONITORING:
 
 OUTPUT FORMAT (JSON ONLY):
 {
-  "next_agent": "Analyser" | "Planner" | "Coder" | "QA" | "Reviewer" | "FINISH",
+  "next_agent": "Analyser" | "Planner" | "Coder" | "QA" | "Reviewer" | "Researcher" | "AssetDesigner" | "FINISH",
   "reasoning": "Brief explanation of the choice",
   "context_commands": []
 }`;
@@ -171,9 +179,11 @@ const DEFAULT_AGENTS: IAgentDefinition[] = [
     { id: 'Analyser', name: 'Analyser', role: 'Systems Analyst', color: '#3b82f6', systemPrompt: ANALYSER_PROMPT, description: 'Dissects problems into requirements and risks.', capabilities: [] },
     { id: 'Planner', name: 'Planner', role: 'Technical Lead', color: '#a855f7', systemPrompt: PLANNER_PROMPT, description: 'Creates executable checklists.', capabilities: [] },
     { id: 'Coder', name: 'Coder', role: 'Software Engineer', color: '#22c55e', systemPrompt: CODER_PROMPT, description: 'Writes and modifies code.', capabilities: ['write_file', 'replace', 'read_file'] },
+    { id: 'Researcher', name: 'Researcher', role: 'Research Specialist', color: '#ec4899', systemPrompt: RESEARCHER_PROMPT, description: 'Deep web research and data extraction.', capabilities: ['web_search', 'visit_page'] },
+    { id: 'AssetDesigner', name: 'AssetDesigner', role: 'Asset Designer', color: '#0ea5e9', systemPrompt: ASSET_DESIGNER_PROMPT, description: 'Generates and processes high-quality assets using Nano Banana Pro.', capabilities: ['generate_image', 'resize_image', 'save_asset'] },
     { id: 'QA', name: 'QA', role: 'QA Engineer', color: '#f97316', systemPrompt: QA_PROMPT, description: 'Validates code and finds defects.', capabilities: [] },
     { id: 'Reviewer', name: 'Reviewer', role: 'Principal Architect', color: '#ef4444', systemPrompt: REVIEWER_PROMPT, description: 'Performs final code review.', capabilities: [] },
-    { id: 'Solo', name: 'Solo Dev', role: 'Full Stack Developer', color: '#8b5cf6', systemPrompt: SOLO_PROMPT, description: 'Autonomous agent that handles all tasks.', capabilities: ['write_file', 'replace', 'read_file'] }
+    { id: 'Solo', name: 'Solo Dev', role: 'Full Stack Developer', color: '#8b5cf6', systemPrompt: SOLO_PROMPT, description: 'Autonomous agent that handles all tasks.', capabilities: ['write_file', 'replace', 'read_file', 'web_search', 'visit_page', 'generate_image', 'resize_image'] }
 ];
 
 export class WorkflowService {

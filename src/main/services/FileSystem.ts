@@ -155,6 +155,26 @@ export class FileSystemService {
     });
   }
 
+  async selectFolder(title?: string): Promise<string | null> {
+      const { canceled, filePaths } = await dialog.showOpenDialog({
+          title: title || 'Select Folder',
+          properties: ['openDirectory', 'createDirectory']
+      });
+
+      if (canceled || filePaths.length === 0) {
+          return null;
+      }
+      return filePaths[0];
+  }
+
+  async copyFile(src: string, destDir: string): Promise<string> {
+      await fsExtra.ensureDir(destDir);
+      const filename = path.basename(src);
+      const destPath = path.join(destDir, filename);
+      await fsExtra.copy(src, destPath);
+      return destPath;
+  }
+
   async getFileTree(): Promise<IFileNode[]> {
     if (!this.projectRoot) return [];
     return await this.readDirectory(this.projectRoot);
