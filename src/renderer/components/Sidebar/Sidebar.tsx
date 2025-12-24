@@ -1,14 +1,15 @@
 import React, { useState } from 'react';
-import { Files, Search, Settings, FolderOpen, MoreVertical, Share2 } from 'lucide-react';
+import { Files, Search, Settings, FolderOpen, MoreVertical, Share2, History } from 'lucide-react';
 import clsx from 'clsx';
 import { FileTree } from './FileTree';
 import { SearchPanel } from './SearchPanel';
 import { ActiveContextList } from './ActiveContextList';
+import { TaskHistory } from './TaskHistory';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { useFileStore } from '../../store/useFileStore';
 import { useViewStore } from '../../store/useViewStore';
 
-type SidebarView = 'explorer' | 'search';
+type SidebarView = 'explorer' | 'search' | 'history';
 
 export const Sidebar = () => {
     const [sidebarView, setSidebarView] = useState<SidebarView>('explorer');
@@ -16,7 +17,7 @@ export const Sidebar = () => {
     const { toggleModal } = useSettingsStore();
     const { openFolder } = useFileStore();
 
-    const handleViewChange = (view: 'explorer' | 'search') => {
+    const handleViewChange = (view: SidebarView) => {
         setSidebarView(view);
         setActiveView('editor'); // Switch back to editor when sidebar is clicked
     };
@@ -40,6 +41,14 @@ export const Sidebar = () => {
                 >
                     <Search size={24} strokeWidth={1.5} />
                     {activeView === 'editor' && sidebarView === 'search' && <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-white" />}
+                </button>
+                <button 
+                    onClick={() => handleViewChange('history')}
+                    className={clsx("p-2 mb-2 rounded hover:text-white relative", activeView === 'editor' && sidebarView === 'history' && "text-white")}
+                    title="Task History"
+                >
+                    <History size={24} strokeWidth={1.5} />
+                    {activeView === 'editor' && sidebarView === 'history' && <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-white" />}
                 </button>
 
                 <div className="w-8 h-px bg-gray-700 my-2"></div>
@@ -93,6 +102,10 @@ export const Sidebar = () => {
 
                 {sidebarView === 'search' && (
                     <SearchPanel />
+                )}
+
+                {sidebarView === 'history' && (
+                    <TaskHistory />
                 )}
             </div>
         </div>

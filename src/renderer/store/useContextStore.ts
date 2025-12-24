@@ -14,6 +14,7 @@ interface ContextState {
     addContextItem: (item: ContextItem) => void;
     removeContextItem: (id: string) => void;
     clearContext: () => void;
+    setContext: (items: ContextItem[]) => void;
 }
 
 export const useContextStore = create<ContextState>((set) => ({
@@ -25,4 +26,5 @@ export const useContextStore = create<ContextState>((set) => ({
         activeContext: state.activeContext.filter(i => i.id !== id) 
     })),
     clearContext: () => set({ activeContext: [] }),
+    setContext: (items) => set({ activeContext: items }),
 }));

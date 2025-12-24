@@ -9,6 +9,7 @@ import { TaskVerification } from './TaskVerification';
 import { MissionStatus } from './MissionStatus';
 import { useTaskStore } from '../../store/useTaskStore';
 import { useExecutionStore } from '../../store/useExecutionStore';
+import { useHistoryStore, SavedTask } from '../../store/useHistoryStore';
 
 interface ITokenStats {
     totalInput: number;
@@ -289,10 +290,12 @@ export const ChatWindow: React.FC = () => {
   const [currentAgent, setCurrentAgent] = useState<string | null>(null);
   const [autoApply, setAutoApply] = useState(true);
   
-  const { strictMode, setStrictMode, setTasks, initiateMission, stopTimer } = useTaskStore();
+  const { strictMode, setStrictMode, setTasks, initiateMission, stopTimer, tasks, resetTasks } = useTaskStore();
   const autoMarkTasks = !strictMode;
   const setAutoMarkTasks = (val: boolean) => setStrictMode(!val);
   
+  const { archiveTask, restoreRequest, clearRestoreRequest } = useHistoryStore();
+
   // Stats State
   const [tokenStats, setTokenStats] = useState<ITokenStats>({
       totalInput: 0,
@@ -305,7 +308,7 @@ export const ChatWindow: React.FC = () => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const { settings } = useSettingsStore();
   const { fileTree } = useFileStore();
-  const { activeContext } = useContextStore();
+  const { activeContext, clearContext, setContext } = useContextStore();
   const executionStatus = useExecutionStore(state => state.status);
 
   useEffect(() => {
@@ -314,20 +317,55 @@ export const ChatWindow: React.FC = () => {
     }
   }, [messages]);
 
+  // Handle History Restoration
+  useEffect(() => {
+      if (restoreRequest) {
+          setMessages(restoreRequest.messages);
+          setTasks(restoreRequest.tasks);
+          setContext(restoreRequest.context);
+          if (restoreRequest.tokenStats) {
+              setTokenStats(restoreRequest.tokenStats);
+          }
+          clearRestoreRequest();
+      }
+  }, [restoreRequest, setContext, setTasks, clearRestoreRequest]);
+
   const handleResetChat = async () => {
       if (!window.electron) return;
       
-      const confirm = window.confirm("Are you sure you want to start a new task? This will clear current conversation history and task progress.");
+      const confirm = window.confirm("Are you sure you want to start a new task? This will save the current session to history and clear everything.");
       if (!confirm) return;
 
+      // 1. Archive current session
+      if (messages.length > 0) {
+          const firstUserMsg = messages.find(m => m.role === 'user');
+          const name = firstUserMsg ? firstUserMsg.content.slice(0, 50) + (firstUserMsg.content.length > 50 ? '...' : '') : `Task ${new Date().toLocaleString()}`;
+          
+          archiveTask({
+              id: Date.now().toString(),
+              name,
+              timestamp: Date.now(),
+              messages: [...messages],
+              tasks: [...tasks],
+              context: [...activeContext],
+              tokenStats: { ...tokenStats }
+          });
+      }
+
+      // 2. Clear Local State
       setMessages([]);
-      resetTasks();
       setTokenStats({
           totalInput: 0,
           totalOutput: 0,
           currentContextSize: 0,
           agentStats: {}
       });
+
+      // 3. Clear Stores
+      resetTasks();
+      clearContext();
+
+      // 4. Reset Backend
       await window.electron.ipcRenderer.invoke(CHANNELS.TO_MAIN.RESET_SESSION);
   };
 
