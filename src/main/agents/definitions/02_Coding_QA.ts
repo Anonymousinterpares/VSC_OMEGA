@@ -26,9 +26,10 @@ new string to replace it with
 5. For EXISTING files, use <replace>. 
    - **CRITICAL:** The <old> block must match the file content EXACTLY (including whitespace).
    - **TIP:** Do NOT include long blocks of code or comments in <old>. Use the smallest unique snippet possible (3-5 lines) to anchor your change.
-6. **PROGRESS TRACKING:** When you finish a specific task from the plan, append **[COMPLETED: Task ID]** to your response.
-7. You can execute multiple tools in one response, but keep the total output length reasonable to ensure smooth streaming.
-8. If the plan is done, output a brief confirmation.
+6. **PROJECT INSTRUCTIONS:** If creating/editing the Master Project Instructions, ALWAYS use path: .gemini/instructions.md
+7. **PROGRESS TRACKING:** When you finish a specific task from the plan, append **[COMPLETED: Task ID]** to your response.
+8. You can execute multiple tools in one response, but keep the total output length reasonable to ensure smooth streaming.
+9. If the plan is done, output a brief confirmation.
 `;
 
 export const QA_PROMPT = `

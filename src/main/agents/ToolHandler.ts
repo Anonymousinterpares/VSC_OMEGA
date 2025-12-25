@@ -32,6 +32,7 @@ export class ToolHandler {
   private llm: LLMService;
   private mainWindow: BrowserWindow | null = null;
   private activeProcess: ChildProcessWithoutNullStreams | null = null;
+  private operationMode: 'standard' | 'documentation' = 'standard';
 
   constructor(fileSystem: FileSystemService, proposalManager: ProposalManager, browser: WebBrowserService, llm: LLMService, mainWindow?: BrowserWindow) {
     this.fileSystem = fileSystem;
@@ -39,6 +40,10 @@ export class ToolHandler {
     this.browser = browser;
     this.llm = llm;
     if (mainWindow) this.mainWindow = mainWindow;
+  }
+
+  public setOperationMode(mode: 'standard' | 'documentation') {
+      this.operationMode = mode;
   }
 
   public setMainWindow(window: BrowserWindow) {
@@ -224,6 +229,15 @@ export class ToolHandler {
   }
 
   async executeCommand(command: string, autoApply: boolean, isBackground = false): Promise<ISingleToolResult> {
+      // 0. Security Check
+      if (this.operationMode === 'documentation') {
+          return {
+              llmOutput: `\n[Security Block] Command execution is DISABLED in Documentation Mode.\nYou can only modify Markdown (.md) files.`,
+              userOutput: `\n[Security Block] Command execution is disabled in Documentation Mode.`,
+              action: null
+          };
+      }
+
       // 1. Ask for permission (or check autoApply)
       if (!autoApply) {
           const result = await this.proposalManager.requestApproval({
@@ -350,6 +364,15 @@ export class ToolHandler {
 
   async executeWrite(path: string, content: string, autoApply: boolean): Promise<ISingleToolResult> {
       try {
+        // 0. Security Check
+        if (this.operationMode === 'documentation' && !path.endsWith('.md')) {
+            return {
+                llmOutput: `\n[Security Block] Writing to non-markdown file '${path}' is BLOCKED in Documentation Mode.`,
+                userOutput: `\n[Security Block] Blocked write to '${path}' (Documentation Mode).`,
+                action: null
+            };
+        }
+
         if (autoApply) {
             await this.fileSystem.handleWriteFile(path, content);
             return {
@@ -393,6 +416,15 @@ export class ToolHandler {
 
   async executeReplace(path: string, oldString: string, newString: string, autoApply: boolean): Promise<ISingleToolResult> {
       try {
+          // 0. Security Check
+          if (this.operationMode === 'documentation' && !path.endsWith('.md')) {
+              return {
+                  llmOutput: `\n[Security Block] Modifying non-markdown file '${path}' is BLOCKED in Documentation Mode.`,
+                  userOutput: `\n[Security Block] Blocked modification of '${path}' (Documentation Mode).`,
+                  action: null
+              };
+          }
+
           const currentContent = await this.fileSystem.handleReadFile(path);
           let targetBlock = oldString;
           let matchFound = false;

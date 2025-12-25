@@ -12,6 +12,7 @@ const defaultData: Data = {
     geminiApiKey: '',
     selectedModel: 'gemini-3-flash-preview',
     agenticMode: 'agentic',
+    operationMode: 'standard',
     googleSearchApiKey: '',
     googleSearchCx: ''
   }

@@ -65,6 +65,7 @@ export interface IAppSettings {
   geminiApiKey: string;
   selectedModel: string;
   agenticMode: 'agentic' | 'solo';
+  operationMode: 'standard' | 'documentation';
   googleSearchApiKey?: string;
   googleSearchCx?: string;
 }

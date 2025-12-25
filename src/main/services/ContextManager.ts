@@ -1,11 +1,53 @@
+import * as fs from 'fs-extra';
+import * as os from 'os';
+import * as path from 'path';
+import { app } from 'electron';
+
 export class ContextManager {
     
+    public async loadInstructions(projectRoot: string | null): Promise<string> {
+        let instructions = "";
+
+        // 1. Global Instructions (APP_DATA/global_instructions.md)
+        try {
+            const userDataPath = app.getPath('userData');
+            const globalPath = path.join(userDataPath, 'global_instructions.md');
+            if (await fs.pathExists(globalPath)) {
+                const content = await fs.readFile(globalPath, 'utf-8');
+                instructions += `### GLOBAL MASTER INSTRUCTIONS:\n${content}\n\n`;
+            }
+        } catch (e) {
+            console.error("Failed to load global instructions:", e);
+        }
+
+        // 2. Project Instructions (<ROOT>/.gemini/instructions.md)
+        if (projectRoot) {
+            try {
+                const projectPath = path.join(projectRoot, '.gemini', 'instructions.md');
+                if (await fs.pathExists(projectPath)) {
+                    const content = await fs.readFile(projectPath, 'utf-8');
+                    instructions += `### PROJECT MASTER INSTRUCTIONS:\n${content}\n\n`;
+                }
+            } catch (e) {
+                console.error("Failed to load project instructions:", e);
+            }
+        }
+
+        return instructions;
+    }
+
     public buildContextString(
         userContext: any[] | undefined, 
         fileTree: any[], 
-        workingSet: Map<string, string>
+        workingSet: Map<string, string>,
+        masterInstructions: string = ""
     ): string {
         let output = "";
+
+        // 0. Master Instructions (Highest Priority Context)
+        if (masterInstructions) {
+            output += `${masterInstructions}\n`;
+        }
 
         // 1. File Tree (Structure)
         if (fileTree) {

@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import path from 'path';
+import * as os from 'os';
 import * as fs from 'fs-extra';
 import { FileSystemService } from './services/FileSystem';
 import { SettingsService } from './services/SettingsService';
@@ -93,6 +94,43 @@ app.whenReady().then(() => {
 
   ipcMain.handle(CHANNELS.TO_MAIN.SAVE_SETTINGS, async (_, newSettings) => {
     return await settingsService.saveSettings(newSettings);
+  });
+
+  ipcMain.handle(CHANNELS.TO_MAIN.GET_INSTRUCTIONS, async () => {
+      const userDataPath = app.getPath('userData');
+      const globalPath = path.join(userDataPath, 'global_instructions.md');
+      
+      let globalContent = "";
+      if (await fs.pathExists(globalPath)) {
+          globalContent = await fs.readFile(globalPath, 'utf-8');
+      }
+
+      let projectContent = "";
+      const projectRoot = fileSystemService.getProjectRoot();
+      if (projectRoot) {
+          const projectPath = path.join(projectRoot, '.gemini', 'instructions.md');
+          if (await fs.pathExists(projectPath)) {
+              projectContent = await fs.readFile(projectPath, 'utf-8');
+          }
+      }
+
+      return { global: globalContent, project: projectContent };
+  });
+
+  ipcMain.handle(CHANNELS.TO_MAIN.SAVE_INSTRUCTIONS, async (_, { type, content }) => {
+      let targetPath = "";
+      if (type === 'global') {
+          const userDataPath = app.getPath('userData');
+          targetPath = path.join(userDataPath, 'global_instructions.md');
+      } else {
+          const projectRoot = fileSystemService.getProjectRoot();
+          if (!projectRoot) throw new Error("No project open");
+          targetPath = path.join(projectRoot, '.gemini', 'instructions.md');
+      }
+
+      await fs.ensureDir(path.dirname(targetPath));
+      await fs.writeFile(targetPath, content, 'utf-8');
+      return { success: true };
   });
 
   ipcMain.handle(CHANNELS.TO_MAIN.SEND_MESSAGE, async (_, { agent, message, context, history }) => {

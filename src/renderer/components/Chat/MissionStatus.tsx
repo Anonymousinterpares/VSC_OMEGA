@@ -1,6 +1,7 @@
 import React from 'react';
 import { useTaskStore, ITask } from '../../store/useTaskStore';
 import { useExecutionStore } from '../../store/useExecutionStore';
+import { useSettingsStore } from '../../store/useSettingsStore';
 import { AgentPhase } from '../../../shared/types';
 import { Loader2, Server, Terminal, FileCode, BrainCircuit, Play } from 'lucide-react';
 
@@ -47,6 +48,7 @@ const StatusIcon = ({ status }: { status: ITask['status'] }) => {
 
 export const MissionStatus: React.FC = () => {
   const { tasks, strictMode, startTime, endTime } = useTaskStore();
+  const { settings } = useSettingsStore();
   const [elapsed, setElapsed] = React.useState<string>("00:00");
 
   React.useEffect(() => {
@@ -97,6 +99,12 @@ export const MissionStatus: React.FC = () => {
              <span>{progress}% Complete</span>
         </div>
       </div>
+
+      {settings.operationMode === 'documentation' && (
+          <div className="bg-orange-900/50 border border-orange-500/50 text-orange-200 text-[10px] px-2 py-1 rounded flex items-center gap-2 justify-center">
+              <span>📖 Documentation Mode Active (Read-Only Code)</span>
+          </div>
+      )}
 
       <div className="h-1 w-full bg-gray-700 rounded-full overflow-hidden">
         <div 

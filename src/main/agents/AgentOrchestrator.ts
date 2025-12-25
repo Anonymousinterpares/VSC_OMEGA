@@ -295,6 +295,10 @@ export class AgentOrchestrator {
     const { message, context } = request;
     const settings = await this.settingsService.getSettings();
     const isSoloMode = settings.agenticMode === 'solo';
+    const operationMode = settings.operationMode || 'standard';
+
+    // 1. Configure Tool Security
+    this.tools.setOperationMode(operationMode);
 
     this.emitPhase('PREPARING_CONTEXT', 'Reading files and building context...');
 
@@ -308,16 +312,25 @@ export class AgentOrchestrator {
     this.abortController = new AbortController();
     const signal = this.abortController.signal;
 
+    // 2. Load Master Instructions
+    const masterInstructions = await this.contextManager.loadInstructions(this.fileSystem.getProjectRoot());
+
     // Build context with persistent working set via ContextManager
-    let formattedContext = this.contextManager.buildContextString(context?.activeContext, context?.fileTree, this.projectWorkingSet);
+    let formattedContext = this.contextManager.buildContextString(context?.activeContext, context?.fileTree, this.projectWorkingSet, masterInstructions);
 
     // PREPEND HISTORY: Format the previous messages so the agent sees the full conversation
     console.log(`[Orchestrator] Received history items: ${request.history?.length || 0}`);
     const historyText = request.history && request.history.length > 0 
         ? request.history.map(m => `[${m.role === 'user' ? 'User' : (m.agentName || 'System')}]: ${m.content}`).join('\n\n') + '\n\n'
         : "";
+    
+    // 3. Mode-Specific Prompt Injection
+    let modeSystemInject = "";
+    if (operationMode === 'documentation') {
+        modeSystemInject = "\n\n[SYSTEM NOTICE]: You are in DOCUMENTATION MODE. You may only read files and create/edit Markdown (.md) files. Do NOT attempt to modify code or run commands.";
+    }
 
-    let currentHistory = `${historyText}User Request: ${message}`;
+    let currentHistory = `${historyText}User Request: ${message}${modeSystemInject}`;
     let loopCount = 0;
     const MAX_LOOPS = 30;
     let finalContent = "";
@@ -331,7 +344,7 @@ export class AgentOrchestrator {
 
       // Refresh Context with latest file structure and session changes
       const freshTree = await this.fileSystem.getFileTree();
-      formattedContext = this.contextManager.buildContextString(context?.activeContext, freshTree, this.projectWorkingSet);
+      formattedContext = this.contextManager.buildContextString(context?.activeContext, freshTree, this.projectWorkingSet, masterInstructions);
 
       if (this.isPaused) {
           let previewSystemPrompt = "";

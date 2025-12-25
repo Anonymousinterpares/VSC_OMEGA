@@ -30,6 +30,10 @@ PROTOCOL:
 2. Granularity: Tasks must be atomic (e.g., "Create file X", "Add function Y").
 3. Verification: Define how to check if the step is done.
 
+PROJECT INSTRUCTIONS:
+- If you are asked to create or update "Project Instructions" or "Master Instructions", you MUST use the file path: .gemini/instructions.md
+- DO NOT invent new paths like "PROJECT_INSTRUCTIONS.md".
+
 OUTPUT FORMAT (Markdown List):
 Generate a Master Checklist.
 - [ ] **Task 1:** [Action] in [File]. *Verify by:* [Criteria]
@@ -63,9 +67,10 @@ new string to replace it with
 5. For EXISTING files, use <replace>. 
    - **CRITICAL:** The <old> block must match the file content EXACTLY (including whitespace).
    - **TIP:** Do NOT include long blocks of code or comments in <old>. Use the smallest unique snippet possible (3-5 lines) to anchor your change.
-6. **PROGRESS TRACKING:** When you finish a specific task from the plan, append **[COMPLETED: Task ID]** to your response.
-7. You can execute multiple tools in one response, but keep the total output length reasonable to ensure smooth streaming.
-8. If the plan is done, output a brief confirmation.`;
+6. **PROJECT INSTRUCTIONS:** If creating/editing the Master Project Instructions, ALWAYS use path: .gemini/instructions.md
+7. **PROGRESS TRACKING:** When you finish a specific task from the plan, append **[COMPLETED: Task ID]** to your response.
+8. You can execute multiple tools in one response, but keep the total output length reasonable to ensure smooth streaming.
+9. If the plan is done, output a brief confirmation.`;
 
 const QA_PROMPT = `You are a Lead QA Engineer. You break what the Coder builds.
 
@@ -148,6 +153,7 @@ You are responsible for the ENTIRE lifecycle of the task: Analysis, Planning, Im
 
 ### RULES
 - **Do NOT** start coding until the user confirms your plan.
+- **PROJECT INSTRUCTIONS:** If creating/editing the Master Project Instructions, ALWAYS use path: .gemini/instructions.md
 - Be precise.
 - ALWAYS output **[FINISH]** when you are done.`;
 
@@ -211,11 +217,38 @@ export class WorkflowService {
         try {
             if (await fs.pathExists(this.workflowPath)) {
                 const data = await fs.readJson(this.workflowPath);
-                // Validate schema loosely
-                if (data.agents && data.routerPrompt) {
-                    this.currentWorkflow = data;
-                    return this.currentWorkflow;
+                
+                // AUTO-MIGRATE: Check if prompts are outdated regarding instructions.md
+                let dirty = false;
+                const agents = data.agents || [];
+                
+                const coder = agents.find((a: any) => a.id === 'Coder');
+                if (coder && !coder.systemPrompt.includes('.gemini/instructions.md')) {
+                     coder.systemPrompt = CODER_PROMPT; // Update to new default
+                     dirty = true;
                 }
+                
+                const planner = agents.find((a: any) => a.id === 'Planner');
+                if (planner && !planner.systemPrompt.includes('.gemini/instructions.md')) {
+                     planner.systemPrompt = PLANNER_PROMPT;
+                     dirty = true;
+                }
+                
+                const solo = agents.find((a: any) => a.id === 'Solo');
+                if (solo && !solo.systemPrompt.includes('.gemini/instructions.md')) {
+                     solo.systemPrompt = SOLO_PROMPT;
+                     dirty = true;
+                }
+
+                if (dirty) {
+                    console.log("WorkflowService: Auto-migrating outdated prompts...");
+                    this.currentWorkflow = data;
+                    await this.saveWorkflow(this.currentWorkflow);
+                } else {
+                    this.currentWorkflow = data;
+                }
+
+                return this.currentWorkflow;
             }
         } catch (error) {
             console.error('Failed to load workflow:', error);

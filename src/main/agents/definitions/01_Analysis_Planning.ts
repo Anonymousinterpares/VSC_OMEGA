@@ -25,6 +25,10 @@ PROTOCOL:
 2. Granularity: Tasks must be atomic (e.g., "Create file X", "Add function Y").
 3. Verification: Define how to check if the step is done.
 
+PROJECT INSTRUCTIONS:
+- If you are asked to create or update "Project Instructions" or "Master Instructions", you MUST use the file path: .gemini/instructions.md
+- DO NOT invent new paths like "PROJECT_INSTRUCTIONS.md".
+
 OUTPUT FORMAT (Markdown List):
 Generate a Master Checklist.
 - [ ] **Task 1:** [Action] in [File]. *Verify by:* [Criteria]

@@ -12,6 +12,8 @@ export const CHANNELS = {
     GET_SETTINGS: 'get-settings',
     SAVE_SETTINGS: 'save-settings',
     CHECK_SYNTAX: 'check-syntax',
+    GET_INSTRUCTIONS: 'get-instructions',
+    SAVE_INSTRUCTIONS: 'save-instructions',
     SEND_MESSAGE: 'send-message',
     ABORT_WORKFLOW: 'abort-workflow',
     COMPRESS_CONTEXT: 'compress-context',
