@@ -25,12 +25,13 @@ export const CHANNELS = {
     RESET_WORKFLOW: 'reset-workflow',
     UNDO_WORKFLOW: 'undo-workflow',
     REDO_WORKFLOW: 'redo-workflow',
-    PAUSE_WORKFLOW: 'workflow:pause',
-    RESUME_WORKFLOW: 'workflow:resume',
+    
+    // Control
+    PAUSE_WORKFLOW: 'pause-workflow',
+    RESUME_WORKFLOW: 'resume-workflow',
 
-    // Terminal
-    KILL_PROCESS: 'terminal:kill-process',
-    TERMINAL_INPUT: 'terminal:input'
+    // Assets
+    SAVE_TEMP_IMAGE: 'save-temp-image',
   },
   TO_RENDERER: {
         AGENT_STEP_UPDATE: 'agent:step-update',

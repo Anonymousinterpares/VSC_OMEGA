@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, ChevronDown, ChevronRight, Activity, Layers, RefreshCw, Square, Pause, Play, PlusCircle } from 'lucide-react';
+import { Send, ChevronDown, ChevronRight, Activity, Layers, RefreshCw, Square, Pause, Play, PlusCircle, Image as ImageIcon, X } from 'lucide-react';
 import { CHANNELS } from '@/shared/constants';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { useFileStore } from '../../store/useFileStore';
@@ -289,7 +289,9 @@ export const ChatWindow: React.FC = () => {
   const [isThinking, setIsThinking] = useState(false);
   const [currentAgent, setCurrentAgent] = useState<string | null>(null);
   const [autoApply, setAutoApply] = useState(true);
+  const [attachments, setAttachments] = useState<Array<{ name: string; preview: string; data: string }>>([]);
   
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { strictMode, setStrictMode, setTasks, initiateMission, stopTimer, tasks, resetTasks } = useTaskStore();
   const autoMarkTasks = !strictMode;
   const setAutoMarkTasks = (val: boolean) => setStrictMode(!val);
@@ -304,6 +306,7 @@ export const ChatWindow: React.FC = () => {
       agentStats: {}
   });
   const [isCompressing, setIsCompressing] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const { settings } = useSettingsStore();
@@ -329,6 +332,78 @@ export const ChatWindow: React.FC = () => {
           clearRestoreRequest();
       }
   }, [restoreRequest, setContext, setTasks, clearRestoreRequest]);
+
+  // --- Attachment Handlers ---
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (e.target.files && e.target.files.length > 0) {
+          processFiles(Array.from(e.target.files));
+      }
+      // Reset input
+      if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+      if (e.clipboardData.items) {
+          const items = Array.from(e.clipboardData.items);
+          const files: File[] = [];
+          
+          for (const item of items) {
+              if (item.type.indexOf('image') !== -1) {
+                  const file = item.getAsFile();
+                  if (file) files.push(file);
+              }
+          }
+          
+          if (files.length > 0) {
+              processFiles(files);
+          }
+      }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+      e.preventDefault();
+      setIsDragging(false);
+      
+      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+          const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+          if (files.length > 0) {
+              processFiles(files);
+          }
+      }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+      e.preventDefault();
+      setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+      e.preventDefault();
+      setIsDragging(false);
+  };
+
+  const processFiles = (files: File[]) => {
+      files.forEach(file => {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+              if (e.target?.result) {
+                  setAttachments(prev => [...prev, {
+                      name: file.name,
+                      preview: e.target!.result as string,
+                      data: e.target!.result as string
+                  }]);
+              }
+          };
+          reader.readAsDataURL(file);
+      });
+  };
+
+  const removeAttachment = (index: number) => {
+      setAttachments(prev => prev.filter((_, i) => i !== index));
+  };
+
+  // --- End Attachment Handlers ---
 
   const handleResetChat = async () => {
       if (!window.electron) return;
@@ -360,6 +435,7 @@ export const ChatWindow: React.FC = () => {
           currentContextSize: 0,
           agentStats: {}
       });
+      setAttachments([]);
 
       // 3. Clear Stores
       resetTasks();
@@ -499,18 +575,42 @@ export const ChatWindow: React.FC = () => {
   };
 
   const handleSend = async () => {
-    if (!input.trim() || isThinking) return;
+    if ((!input.trim() && attachments.length === 0) || isThinking) return;
+
+    let finalContent = input;
+    
+    // Upload images if any
+    if (attachments.length > 0 && window.electron) {
+        setIsThinking(true); // temporary lock
+        try {
+            for (const att of attachments) {
+                const result = await window.electron.ipcRenderer.invoke(CHANNELS.TO_MAIN.SAVE_TEMP_IMAGE, {
+                    name: att.name,
+                    data: att.data
+                });
+                
+                if (result.success && result.path) {
+                    finalContent += `\n\n{{IMAGE:${result.path}}}`;
+                } else {
+                    console.error("Failed to upload image", result.error);
+                }
+            }
+        } catch (e) {
+            console.error("Image upload failed", e);
+        }
+    }
 
     const userMsg: IAgentMessage = {
       id: Date.now().toString(),
       role: 'user',
-      content: input,
+      content: finalContent,
       timestamp: Date.now()
     };
 
     // Add User Message
     setMessages(prev => [...prev, userMsg]);
     setInput('');
+    setAttachments([]); // Clear attachments
     setIsThinking(true);
     setCurrentAgent('Router'); // Initial state
     initiateMission(); // Start timer immediately
@@ -673,58 +773,105 @@ export const ChatWindow: React.FC = () => {
       <MissionStatus />
 
       {/* Input */}
-      <div className="p-4 bg-gray-900 border-t border-gray-800">
+      <div 
+        className={`p-4 bg-gray-900 border-t border-gray-800 transition-colors ${isDragging ? 'bg-blue-900/20' : ''}`}
+        onPaste={handlePaste}
+        onDrop={handleDrop}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+      >
         {isThinking && currentAgent && (
             <div className="mb-2 flex items-center space-x-2 animate-pulse">
                 <span className="text-xs font-mono text-blue-400 font-bold">{currentAgent}</span>
                 <span className="text-xs text-gray-500">is working...</span>
             </div>
         )}
-        <div className="relative">
+
+        {/* Attachment Previews */}
+        {attachments.length > 0 && (
+            <div className="flex space-x-2 mb-2 overflow-x-auto pb-2">
+                {attachments.map((att, index) => (
+                    <div key={index} className="relative group flex-shrink-0">
+                        <img 
+                            src={att.preview} 
+                            alt={att.name} 
+                            className="h-16 w-16 object-cover rounded border border-gray-700" 
+                        />
+                        <button 
+                            onClick={() => removeAttachment(index)}
+                            className="absolute -top-1 -right-1 bg-red-500 rounded-full p-0.5 text-white opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                        >
+                            <X size={10} />
+                        </button>
+                    </div>
+                ))}
+            </div>
+        )}
+
+        <div className="relative flex items-end space-x-2">
+           <input 
+               type="file" 
+               multiple 
+               accept="image/*" 
+               className="hidden" 
+               ref={fileInputRef}
+               onChange={handleFileSelect}
+           />
+           <button 
+               onClick={() => fileInputRef.current?.click()}
+               className="p-2 mb-1 rounded hover:bg-gray-800 text-gray-500 hover:text-gray-300 transition-colors"
+               title="Attach Image"
+           >
+               <ImageIcon size={20} />
+           </button>
+
           <textarea
-            className="w-full bg-gray-800 border border-gray-700 rounded-lg pl-3 pr-10 py-2 text-sm text-white focus:outline-none focus:border-blue-500 resize-none"
+            className="flex-1 bg-gray-800 border border-gray-700 rounded-lg pl-3 pr-10 py-2 text-sm text-white focus:outline-none focus:border-blue-500 resize-none"
             rows={3}
-            placeholder="Ask the agents..."
+            placeholder={isDragging ? "Drop images here..." : "Ask the agents... (Paste images or use +)"}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
           />
-          {isThinking ? (
-            <div className="absolute bottom-2 right-2 flex space-x-1">
-                {executionStatus === 'PAUSED' ? (
-                     <button 
-                        onClick={handleResume}
-                        className="p-1.5 bg-green-600 rounded-md text-white hover:bg-green-500 transition-colors"
-                        title="Resume Workflow"
-                      >
-                        <Play size={16} fill="currentColor" />
-                      </button>
-                ) : (
-                      <button 
-                        onClick={handlePause}
-                        className="p-1.5 bg-yellow-600 rounded-md text-white hover:bg-yellow-500 transition-colors"
-                        title="Pause Workflow"
-                      >
-                        <Pause size={16} fill="currentColor" />
-                      </button>
-                )}
+          
+          <div className="flex flex-col space-y-2 mb-1">
+              {isThinking ? (
+                <div className="flex space-x-1">
+                    {executionStatus === 'PAUSED' ? (
+                         <button 
+                            onClick={handleResume}
+                            className="p-1.5 bg-green-600 rounded-md text-white hover:bg-green-500 transition-colors"
+                            title="Resume Workflow"
+                          >
+                            <Play size={16} fill="currentColor" />
+                          </button>
+                    ) : (
+                          <button 
+                            onClick={handlePause}
+                            className="p-1.5 bg-yellow-600 rounded-md text-white hover:bg-yellow-500 transition-colors"
+                            title="Pause Workflow"
+                          >
+                            <Pause size={16} fill="currentColor" />
+                          </button>
+                    )}
+                    <button 
+                      onClick={handleStop}
+                      className="p-1.5 bg-red-600 rounded-md text-white hover:bg-red-500 transition-colors"
+                      title="Stop Generation"
+                    >
+                      <Square size={16} fill="currentColor" />
+                    </button>
+                </div>
+              ) : (
                 <button 
-                  onClick={handleStop}
-                  className="p-1.5 bg-red-600 rounded-md text-white hover:bg-red-500 transition-colors"
-                  title="Stop Generation"
+                  onClick={handleSend}
+                  disabled={!input.trim() && attachments.length === 0}
+                  className="p-1.5 bg-blue-600 rounded-md text-white hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <Square size={16} fill="currentColor" />
+                  <Send size={16} />
                 </button>
-            </div>
-          ) : (
-            <button 
-              onClick={handleSend}
-              disabled={!input.trim()}
-              className="absolute bottom-2 right-2 p-1.5 bg-blue-600 rounded-md text-white hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Send size={16} />
-            </button>
-          )}
+              )}
+          </div>
         </div>
       </div>
     </div>
