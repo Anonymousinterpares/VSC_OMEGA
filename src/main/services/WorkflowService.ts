@@ -34,6 +34,9 @@ PROJECT INSTRUCTIONS:
 - If you are asked to create or update "Project Instructions" or "Master Instructions", you MUST use the file path: .gemini/instructions.md
 - DO NOT invent new paths like "PROJECT_INSTRUCTIONS.md".
 
+MASTER CHECKLIST:
+- If asked to create or update the "Master Checklist", you MUST use the file path: .gemini/checklist.md
+
 OUTPUT FORMAT (Markdown List):
 Generate a Master Checklist.
 - [ ] **Task 1:** [Action] in [File]. *Verify by:* [Criteria]
@@ -68,8 +71,9 @@ new string to replace it with
    - **CRITICAL:** The <old> block must match the file content EXACTLY (including whitespace).
    - **TIP:** Do NOT include long blocks of code or comments in <old>. Use the smallest unique snippet possible (3-5 lines) to anchor your change.
 6. **PROJECT INSTRUCTIONS:** If creating/editing the Master Project Instructions, ALWAYS use path: .gemini/instructions.md
-7. **PROGRESS TRACKING:** When you finish a specific task from the plan, append **[COMPLETED: Task ID]** to your response.
-8. You can execute multiple tools in one response, but keep the total output length reasonable to ensure smooth streaming.
+7. **MASTER CHECKLIST:** If creating/editing the Master Checklist, ALWAYS use path: .gemini/checklist.md
+8. **PROGRESS TRACKING:** When you finish a specific task from the plan, append **[COMPLETED: Task ID]** to your response.
+9. You can execute multiple tools in one response, but keep the total output length reasonable to ensure smooth streaming.
 9. If the plan is done, output a brief confirmation.`;
 
 const QA_PROMPT = `You are a Lead QA Engineer. You break what the Coder builds.
@@ -154,6 +158,7 @@ You are responsible for the ENTIRE lifecycle of the task: Analysis, Planning, Im
 ### RULES
 - **Do NOT** start coding until the user confirms your plan.
 - **PROJECT INSTRUCTIONS:** If creating/editing the Master Project Instructions, ALWAYS use path: .gemini/instructions.md
+- **MASTER CHECKLIST:** If creating/editing the Master Checklist, ALWAYS use path: .gemini/checklist.md
 - Be precise.
 - ALWAYS output **[FINISH]** when you are done.`;
 
@@ -223,19 +228,19 @@ export class WorkflowService {
                 const agents = data.agents || [];
                 
                 const coder = agents.find((a: any) => a.id === 'Coder');
-                if (coder && !coder.systemPrompt.includes('.gemini/instructions.md')) {
+                if (coder && (!coder.systemPrompt.includes('.gemini/instructions.md') || !coder.systemPrompt.includes('.gemini/checklist.md'))) {
                      coder.systemPrompt = CODER_PROMPT; // Update to new default
                      dirty = true;
                 }
                 
                 const planner = agents.find((a: any) => a.id === 'Planner');
-                if (planner && !planner.systemPrompt.includes('.gemini/instructions.md')) {
+                if (planner && (!planner.systemPrompt.includes('.gemini/instructions.md') || !planner.systemPrompt.includes('.gemini/checklist.md'))) {
                      planner.systemPrompt = PLANNER_PROMPT;
                      dirty = true;
                 }
                 
                 const solo = agents.find((a: any) => a.id === 'Solo');
-                if (solo && !solo.systemPrompt.includes('.gemini/instructions.md')) {
+                if (solo && (!solo.systemPrompt.includes('.gemini/instructions.md') || !solo.systemPrompt.includes('.gemini/checklist.md'))) {
                      solo.systemPrompt = SOLO_PROMPT;
                      dirty = true;
                 }

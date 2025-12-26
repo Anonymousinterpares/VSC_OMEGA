@@ -1,6 +1,5 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import path from 'path';
-import * as os from 'os';
 import * as fs from 'fs-extra';
 import { FileSystemService } from './services/FileSystem';
 import { SettingsService } from './services/SettingsService';
@@ -130,6 +129,27 @@ app.whenReady().then(() => {
 
       await fs.ensureDir(path.dirname(targetPath));
       await fs.writeFile(targetPath, content, 'utf-8');
+      return { success: true };
+  });
+
+  ipcMain.handle(CHANNELS.TO_MAIN.GET_CHECKLIST, async () => {
+      const projectRoot = fileSystemService.getProjectRoot();
+      if (!projectRoot) return "";
+      
+      const checklistPath = path.join(projectRoot, '.gemini', 'checklist.md');
+      if (await fs.pathExists(checklistPath)) {
+          return await fs.readFile(checklistPath, 'utf-8');
+      }
+      return "";
+  });
+
+  ipcMain.handle(CHANNELS.TO_MAIN.SAVE_CHECKLIST, async (_, content) => {
+      const projectRoot = fileSystemService.getProjectRoot();
+      if (!projectRoot) throw new Error("No project open");
+      
+      const checklistPath = path.join(projectRoot, '.gemini', 'checklist.md');
+      await fs.ensureDir(path.dirname(checklistPath));
+      await fs.writeFile(checklistPath, content, 'utf-8');
       return { success: true };
   });
 

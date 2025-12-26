@@ -14,6 +14,8 @@ export const CHANNELS = {
     CHECK_SYNTAX: 'check-syntax',
     GET_INSTRUCTIONS: 'get-instructions',
     SAVE_INSTRUCTIONS: 'save-instructions',
+    GET_CHECKLIST: 'get-checklist',
+    SAVE_CHECKLIST: 'save-checklist',
     SEND_MESSAGE: 'send-message',
     ABORT_WORKFLOW: 'abort-workflow',
     COMPRESS_CONTEXT: 'compress-context',
@@ -34,6 +36,10 @@ export const CHANNELS = {
 
     // Assets
     SAVE_TEMP_IMAGE: 'save-temp-image',
+
+    // Terminal
+    KILL_PROCESS: 'terminal:kill-process',
+    TERMINAL_INPUT: 'terminal:input',
   },
   TO_RENDERER: {
         AGENT_STEP_UPDATE: 'agent:step-update',

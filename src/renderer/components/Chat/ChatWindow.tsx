@@ -309,16 +309,28 @@ export const ChatWindow: React.FC = () => {
   const [isDragging, setIsDragging] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const { settings } = useSettingsStore();
   const { fileTree } = useFileStore();
   const { activeContext, clearContext, setContext } = useContextStore();
   const executionStatus = useExecutionStore(state => state.status);
 
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    // Listen for custom prompts (e.g. from ChecklistPanel)
+    const handleInsertPrompt = (e: any) => {
+        if (e.detail) {
+            setInput(e.detail);
+        }
+    };
+    window.addEventListener('gemini:insert-prompt', handleInsertPrompt);
+    return () => window.removeEventListener('gemini:insert-prompt', handleInsertPrompt);
+  }, []);
+
+  useEffect(() => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages]);
+  }, [messages, isThinking]);
 
   // Handle History Restoration
   useEffect(() => {
@@ -768,6 +780,7 @@ export const ChatWindow: React.FC = () => {
         
         {/* Verification Modal Inject */}
         <TaskVerification />
+        <div ref={messagesEndRef} />
       </div>
 
       <MissionStatus />

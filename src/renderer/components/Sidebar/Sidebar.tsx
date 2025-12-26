@@ -1,15 +1,16 @@
 import React, { useState } from 'react';
-import { Files, Search, Settings, FolderOpen, MoreVertical, Share2, History } from 'lucide-react';
+import { Files, Search, Settings, FolderOpen, MoreVertical, Share2, History, ListTodo } from 'lucide-react';
 import clsx from 'clsx';
 import { FileTree } from './FileTree';
 import { SearchPanel } from './SearchPanel';
 import { ActiveContextList } from './ActiveContextList';
 import { TaskHistory } from './TaskHistory';
+import { ChecklistPanel } from './ChecklistPanel';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { useFileStore } from '../../store/useFileStore';
 import { useViewStore } from '../../store/useViewStore';
 
-type SidebarView = 'explorer' | 'search' | 'history';
+type SidebarView = 'explorer' | 'search' | 'history' | 'checklist';
 
 export const Sidebar = () => {
     const [sidebarView, setSidebarView] = useState<SidebarView>('explorer');
@@ -41,6 +42,14 @@ export const Sidebar = () => {
                 >
                     <Search size={24} strokeWidth={1.5} />
                     {activeView === 'editor' && sidebarView === 'search' && <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-white" />}
+                </button>
+                <button 
+                    onClick={() => handleViewChange('checklist')}
+                    className={clsx("p-2 mb-2 rounded hover:text-white relative", activeView === 'editor' && sidebarView === 'checklist' && "text-white")}
+                    title="Master Checklist"
+                >
+                    <ListTodo size={24} strokeWidth={1.5} />
+                    {activeView === 'editor' && sidebarView === 'checklist' && <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-white" />}
                 </button>
                 <button 
                     onClick={() => handleViewChange('history')}
@@ -102,6 +111,10 @@ export const Sidebar = () => {
 
                 {sidebarView === 'search' && (
                     <SearchPanel />
+                )}
+
+                {sidebarView === 'checklist' && (
+                    <ChecklistPanel />
                 )}
 
                 {sidebarView === 'history' && (
