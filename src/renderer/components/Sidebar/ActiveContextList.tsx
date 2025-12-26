@@ -1,4 +1,3 @@
-import React from 'react';
 import { Database, X } from 'lucide-react';
 import { useContextStore } from '../../store/useContextStore';
 

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { AgentPhase } from '../../../shared/types';
+import { AgentPhase } from '../../shared/types';
 
 interface ExecutionState {
   status: 'IDLE' | 'RUNNING' | 'PAUSED';

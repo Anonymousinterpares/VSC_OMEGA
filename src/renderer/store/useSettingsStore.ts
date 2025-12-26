@@ -14,7 +14,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   settings: {
     geminiApiKey: '',
     selectedModel: 'gemini-3-flash-preview',
-    agenticMode: 'agentic'
+    agenticMode: 'agentic',
+    operationMode: 'standard'
   },
   isOpen: false,
 

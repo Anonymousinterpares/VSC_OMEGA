@@ -495,6 +495,12 @@ export class ToolHandler {
   async executeRead(path: string): Promise<ISingleToolResult> {
       try {
         const content = await this.fileSystem.handleReadFile(path);
+        
+        // Notify Renderer to update context
+        if (this.mainWindow) {
+            this.mainWindow.webContents.send(CHANNELS.TO_RENDERER.FILE_READ, { path, content });
+        }
+
         return {
             llmOutput: `\n### FILE: ${path}\n${content}\n### END FILE\n`,
             userOutput: `\n[System] Read file: ${path}`,

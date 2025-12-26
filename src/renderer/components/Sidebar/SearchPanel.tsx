@@ -13,7 +13,7 @@ export const SearchPanel = () => {
       clearResults, setHighlightTarget 
   } = useSearchStore();
   
-  const { selectFile } = useFileStore();
+  const { openFile } = useFileStore();
 
   const [replaceQuery, setReplaceQuery] = useState('');
   const [showReplace, setShowReplace] = useState(true); // Default to shown for now
@@ -37,7 +37,7 @@ export const SearchPanel = () => {
   };
 
   const handleMatchClick = (filePath: string, match: any) => {
-      selectFile(filePath);
+      openFile(filePath);
       // Determine end column based on match length
       const startCol = match.matchIndex + 1; // Monaco is 1-based
       const endCol = startCol + match.matchLength;

@@ -130,6 +130,25 @@ function App() {
       }
   }, [selectedFile]);
 
+  // Agent Read File Listener (Auto-Add to Context)
+  useEffect(() => {
+      if (window.electron) {
+          const removeListener = window.electron.ipcRenderer.on(CHANNELS.TO_RENDERER.FILE_READ, (data: { path: string, content: string }) => {
+              const currentContext = useContextStore.getState().activeContext;
+              // Check if already in context to avoid duplicates
+              if (!currentContext.some(item => item.path === data.path)) {
+                  addContextItem({
+                      id: data.path, // Use path as ID
+                      type: 'file',
+                      path: data.path,
+                      content: data.content
+                  });
+              }
+          });
+          return () => removeListener();
+      }
+  }, []);
+
   const handleEditorDidMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
     monacoRef.current = monaco;

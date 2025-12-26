@@ -6,7 +6,7 @@ import { useViewStore } from '../../store/useViewStore';
 import { CHANNELS } from '../../../shared/constants';
 
 export const ChecklistPanel: React.FC = () => {
-    const { checklistContent, selectedItems, loadChecklist, saveChecklist, clearSelection } = useChecklistStore();
+    const { checklistContent, selectedItems, loadChecklist, saveChecklist, clearSelection, toggleSelection } = useChecklistStore();
     const { settings } = useSettingsStore();
     const { setActiveView } = useViewStore();
     
