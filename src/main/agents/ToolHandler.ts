@@ -364,43 +364,45 @@ export class ToolHandler {
 
   async executeWrite(path: string, content: string, autoApply: boolean): Promise<ISingleToolResult> {
       try {
+        const cleanPath = path.trim();
         // 0. Security Check
-        if (this.operationMode === 'documentation' && !path.endsWith('.md')) {
+        if (this.operationMode === 'documentation' && !cleanPath.toLowerCase().endsWith('.md')) {
+            console.log(`[ToolHandler] BLOCKED write to ${cleanPath} in Documentation Mode.`);
             return {
-                llmOutput: `\n[Security Block] Writing to non-markdown file '${path}' is BLOCKED in Documentation Mode.`,
-                userOutput: `\n[Security Block] Blocked write to '${path}' (Documentation Mode).`,
+                llmOutput: `\n[Security Block] Writing to non-markdown file '${cleanPath}' is BLOCKED in Documentation Mode.`,
+                userOutput: `\n[Security Block] Blocked write to '${cleanPath}' (Documentation Mode).`,
                 action: null
             };
         }
 
         if (autoApply) {
-            await this.fileSystem.handleWriteFile(path, content);
+            await this.fileSystem.handleWriteFile(cleanPath, content);
             return {
-                llmOutput: `\n[System] Successfully wrote to ${path}`,
-                userOutput: `\n[System] Successfully wrote to ${path}`,
-                action: { type: 'write', path }
+                llmOutput: `\n[System] Successfully wrote to ${cleanPath}`,
+                userOutput: `\n[System] Successfully wrote to ${cleanPath}`,
+                action: { type: 'write', path: cleanPath }
             };
         } else {
             // PROPOSE NEW FILE
             const result = await this.proposalManager.requestApproval({
                 id: Date.now().toString(),
                 type: 'new',
-                path: path,
+                path: cleanPath,
                 original: '', 
                 modified: content
             });
 
             if (result.status === 'accepted') {
-                await this.fileSystem.handleWriteFile(path, result.content || content);
+                await this.fileSystem.handleWriteFile(cleanPath, result.content || content);
                 return {
-                    llmOutput: `\n[System] User APPROVED new file creation: ${path}`,
-                    userOutput: `\n[System] User APPROVED new file creation: ${path}`,
-                    action: { type: 'write', path }
+                    llmOutput: `\n[System] User APPROVED new file creation: ${cleanPath}`,
+                    userOutput: `\n[System] User APPROVED new file creation: ${cleanPath}`,
+                    action: { type: 'write', path: cleanPath }
                 };
             } else {
                 return {
-                    llmOutput: `\n[System] User REJECTED new file creation: ${path}`,
-                    userOutput: `\n[System] User REJECTED new file creation: ${path}`,
+                    llmOutput: `\n[System] User REJECTED new file creation: ${cleanPath}`,
+                    userOutput: `\n[System] User REJECTED new file creation: ${cleanPath}`,
                     action: null
                 };
             }
@@ -416,16 +418,18 @@ export class ToolHandler {
 
   async executeReplace(path: string, oldString: string, newString: string, autoApply: boolean): Promise<ISingleToolResult> {
       try {
+          const cleanPath = path.trim();
           // 0. Security Check
-          if (this.operationMode === 'documentation' && !path.endsWith('.md')) {
+          if (this.operationMode === 'documentation' && !cleanPath.toLowerCase().endsWith('.md')) {
+              console.log(`[ToolHandler] BLOCKED replace in ${cleanPath} in Documentation Mode.`);
               return {
-                  llmOutput: `\n[Security Block] Modifying non-markdown file '${path}' is BLOCKED in Documentation Mode.`,
-                  userOutput: `\n[Security Block] Blocked modification of '${path}' (Documentation Mode).`,
+                  llmOutput: `\n[Security Block] Modifying non-markdown file '${cleanPath}' is BLOCKED in Documentation Mode.`,
+                  userOutput: `\n[Security Block] Blocked modification of '${cleanPath}' (Documentation Mode).`,
                   action: null
               };
           }
 
-          const currentContent = await this.fileSystem.handleReadFile(path);
+          const currentContent = await this.fileSystem.handleReadFile(cleanPath);
           let targetBlock = oldString;
           let matchFound = false;
 
@@ -444,11 +448,11 @@ export class ToolHandler {
           if (matchFound) {
               if (autoApply) {
                   const newContent = currentContent.replace(targetBlock, newString);
-                  await this.fileSystem.handleWriteFile(path, newContent);
+                  await this.fileSystem.handleWriteFile(cleanPath, newContent);
                   return {
-                      llmOutput: `\n[System] Successfully patched ${path}`,
-                      userOutput: `\n[System] Successfully patched ${path}`,
-                      action: { type: 'replace', path }
+                      llmOutput: `\n[System] Successfully patched ${cleanPath}`,
+                      userOutput: `\n[System] Successfully patched ${cleanPath}`,
+                      action: { type: 'replace', path: cleanPath }
                   };
               } else {
                   // PROPOSE EDIT
@@ -456,30 +460,30 @@ export class ToolHandler {
                   const result = await this.proposalManager.requestApproval({
                       id: Date.now().toString(),
                       type: 'edit',
-                      path: path,
+                      path: cleanPath,
                       original: currentContent,
                       modified: proposedContent
                   });
 
                   if (result.status === 'accepted') {
-                      await this.fileSystem.handleWriteFile(path, result.content || proposedContent);
+                      await this.fileSystem.handleWriteFile(cleanPath, result.content || proposedContent);
                       return {
-                          llmOutput: `\n[System] User APPROVED edit to ${path}`,
-                          userOutput: `\n[System] User APPROVED edit to ${path}`,
-                          action: { type: 'replace', path }
+                          llmOutput: `\n[System] User APPROVED edit to ${cleanPath}`,
+                          userOutput: `\n[System] User APPROVED edit to ${cleanPath}`,
+                          action: { type: 'replace', path: cleanPath }
                       };
                   } else {
                       return {
-                          llmOutput: `\n[System] User REJECTED edit to ${path}`,
-                          userOutput: `\n[System] User REJECTED edit to ${path}`,
+                          llmOutput: `\n[System] User REJECTED edit to ${cleanPath}`,
+                          userOutput: `\n[System] User REJECTED edit to ${cleanPath}`,
                           action: null
                       };
                   }
               }
           } else {
                return {
-                   llmOutput: `\n[System] Replace failed: 'old' string not found in ${path}. \n\nHINT: Ensure <old> tag content matches the file EXACTLY, including whitespace and indentation.`,
-                   userOutput: `\n[System] Replace failed: 'old' string not found in ${path}.`,
+                   llmOutput: `\n[System] Replace failed: 'old' string not found in ${cleanPath}. \n\nHINT: Ensure <old> tag content matches the file EXACTLY, including whitespace and indentation.`,
+                   userOutput: `\n[System] Replace failed: 'old' string not found in ${cleanPath}.`,
                    action: null
                };
           }
@@ -492,24 +496,27 @@ export class ToolHandler {
       }
   }
 
-  async executeRead(path: string): Promise<ISingleToolResult> {
+  async executeRead(filePath: string): Promise<ISingleToolResult> {
       try {
-        const content = await this.fileSystem.handleReadFile(path);
+        const content = await this.fileSystem.handleReadFile(filePath);
         
-        // Notify Renderer to update context
+        // Notify Renderer to update context (Ensure Absolute Path)
         if (this.mainWindow) {
-            this.mainWindow.webContents.send(CHANNELS.TO_RENDERER.FILE_READ, { path, content });
+            const projectRoot = this.fileSystem.getProjectRoot();
+            const absolutePath = path.isAbsolute(filePath) ? filePath : (projectRoot ? path.join(projectRoot, filePath) : path.resolve(filePath));
+            
+            this.mainWindow.webContents.send(CHANNELS.TO_RENDERER.FILE_READ, { path: absolutePath, content });
         }
 
         return {
-            llmOutput: `\n### FILE: ${path}\n${content}\n### END FILE\n`,
-            userOutput: `\n[System] Read file: ${path}`,
-            action: { type: 'read', path }
+            llmOutput: `\n### FILE: ${filePath}\n${content}\n### END FILE\n`,
+            userOutput: `\n[System] Read file: ${filePath}`,
+            action: { type: 'read', path: filePath }
         };
       } catch (e: any) {
         return {
-            llmOutput: `\n[System] Error reading ${path}: ${e.message}`,
-            userOutput: `\n[System] Error reading ${path}: ${e.message}`,
+            llmOutput: `\n[System] Error reading ${filePath}: ${e.message}`,
+            userOutput: `\n[System] Error reading ${filePath}: ${e.message}`,
             action: null
         };
       }

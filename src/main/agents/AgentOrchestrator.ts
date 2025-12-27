@@ -297,6 +297,8 @@ export class AgentOrchestrator {
     const isSoloMode = settings.agenticMode === 'solo';
     const operationMode = settings.operationMode || 'standard';
 
+    console.log(`[Orchestrator] Handling message. Mode: ${operationMode}, AutoApply: ${context?.autoApply ?? true}`);
+
     // 1. Configure Tool Security
     this.tools.setOperationMode(operationMode);
 
@@ -711,6 +713,9 @@ export class AgentOrchestrator {
             this.parseChecklist(agentOutput);
           }
 
+          // Auto-verify files if any agent requests them in JSON
+          await this.handleAutoVerification(agentOutput);
+
           // Check for explicit [FINISH] token from Solo agent
           if (isSoloMode && agentOutput.includes('[FINISH]')) {
               nextAgent = 'FINISH';
@@ -760,6 +765,46 @@ export class AgentOrchestrator {
       content: finalContent,
       steps: []
     };
+  }
+
+  private async handleAutoVerification(text: string) {
+      try {
+          // Extract JSON from code blocks or raw text
+          const jsonMatch = text.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/) || text.match(/\{[\s\S]*\}/);
+          if (!jsonMatch) return;
+          
+          const jsonString = jsonMatch[1] || jsonMatch[0];
+          let data: any;
+          try {
+              data = JSON.parse(jsonString);
+          } catch (e) {
+              return; // Not a valid JSON block, ignore
+          }
+          
+          if (data.verification_needed && Array.isArray(data.verification_needed)) {
+              const filesToRead = data.verification_needed.filter((f: any) => typeof f === 'string' && f.includes('.'));
+              
+              if (filesToRead.length > 0) {
+                  this.emitDelta(`\n\n[System: Auto-loading ${filesToRead.length} files into context...]\n`);
+                  
+                  for (const file of filesToRead) {
+                       try {
+                           this.emitDelta(`  - Reading: ${file}\n`);
+                           const result = await this.tools.executeRead(file);
+                           if (result) {
+                              const content = await this.fileSystem.handleReadFile(file);
+                              this.projectWorkingSet.set(file, content);
+                           }
+                       } catch (e) {
+                           console.warn(`[Orchestrator] Failed to auto-verify ${file}:`, e);
+                       }
+                  }
+                  this.emitDelta(`[System: Context updated successfully.]\n`);
+              }
+          }
+      } catch (e) {
+          // Silent fail for non-JSON outputs
+      }
   }
 
   private parseChecklist(text: string) {

@@ -6,13 +6,16 @@ import { useContextStore } from '../../store/useContextStore';
 import { CHANNELS } from '@/shared/constants';
 import clsx from 'clsx';
 
+const normalizePath = (p: string) => p.replace(/\\/g, '/').toLowerCase();
+
 const FileTreeNode: React.FC<{ node: IFileNode; depth?: number }> = ({ node, depth = 0 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [isLoadingContext, setIsLoadingContext] = useState(false);
   const { openFile, selectedFile } = useFileStore();
   const { activeContext, addContextItem, removeContextItem } = useContextStore();
 
-  const isInContext = activeContext.some(item => item.path === node.path);
+  const nodePathNormalized = normalizePath(node.path);
+  const isInContext = activeContext.some(item => normalizePath(item.path) === nodePathNormalized);
 
   const handleClick = () => {
     if (node.type === 'folder') {

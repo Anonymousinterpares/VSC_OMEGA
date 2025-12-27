@@ -135,8 +135,10 @@ function App() {
       if (window.electron) {
           const removeListener = window.electron.ipcRenderer.on(CHANNELS.TO_RENDERER.FILE_READ, (data: { path: string, content: string }) => {
               const currentContext = useContextStore.getState().activeContext;
-              // Check if already in context to avoid duplicates
-              if (!currentContext.some(item => item.path === data.path)) {
+              const normalizedNewPath = data.path.replace(/\\/g, '/').toLowerCase();
+              
+              // Check if already in context to avoid duplicates (case-insensitive slash-insensitive)
+              if (!currentContext.some(item => item.path.replace(/\\/g, '/').toLowerCase() === normalizedNewPath)) {
                   addContextItem({
                       id: data.path, // Use path as ID
                       type: 'file',

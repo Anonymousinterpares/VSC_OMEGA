@@ -20,9 +20,10 @@ const defaultData: Data = {
 
 export class SettingsService {
   private db: any;
+  private initPromise: Promise<void>;
 
   constructor() {
-    this.init();
+    this.initPromise = this.init();
   }
 
   private async init() {
@@ -31,11 +32,13 @@ export class SettingsService {
   }
 
   async getSettings(): Promise<IAppSettings> {
+    await this.initPromise;
     await this.db.read();
     return this.db.data.settings;
   }
 
   async saveSettings(newSettings: Partial<IAppSettings>): Promise<IAppSettings> {
+    await this.initPromise;
     await this.db.read();
     this.db.data.settings = { ...this.db.data.settings, ...newSettings };
     await this.db.write();
