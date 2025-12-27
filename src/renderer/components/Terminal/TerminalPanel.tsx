@@ -8,7 +8,7 @@ interface TerminalMessage {
     timestamp: number;
 }
 
-export const TerminalPanel: React.FC = () => {
+export const TerminalPanel: React.FC<{ leftOffset?: number; rightOffset?: number }> = ({ leftOffset = 320, rightOffset = 384 }) => {
     const [isVisible, setIsVisible] = useState(false);
     const [messages, setMessages] = useState<TerminalMessage[]>([]);
     const [activeCommand, setActiveCommand] = useState<string | null>(null);
@@ -111,7 +111,8 @@ export const TerminalPanel: React.FC = () => {
             ref={containerRef}
             tabIndex={0}
             onKeyDown={handleKeyDown}
-            className={`fixed bottom-0 left-80 right-96 bg-black border-t border-gray-700 transition-all duration-300 flex flex-col shadow-2xl z-50 outline-none ${isVisible ? 'h-64' : 'h-8'} ${isRunning ? 'focus:border-blue-500' : ''}`}
+            style={{ left: leftOffset, right: rightOffset }}
+            className={`fixed bottom-0 bg-black border-t border-gray-700 transition-all duration-300 flex flex-col shadow-2xl z-50 outline-none ${isVisible ? 'h-64' : 'h-8'} ${isRunning ? 'focus:border-blue-500' : ''}`}
         >
             {/* Header */}
             <div className="flex items-center justify-between px-3 h-8 bg-gray-800 border-b border-gray-700 select-none">

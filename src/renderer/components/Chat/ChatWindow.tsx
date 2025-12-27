@@ -705,7 +705,7 @@ export const ChatWindow: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-full bg-gray-900 border-l border-gray-800">
+    <div className="flex flex-col h-full bg-gray-900">
       {/* Header */}
       <div className="p-3 border-b border-gray-800 flex justify-between items-center bg-gray-900">
         <div className="flex items-center space-x-2">

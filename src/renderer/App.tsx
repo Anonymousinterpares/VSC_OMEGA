@@ -29,6 +29,42 @@ function App() {
   const monacoRef = useRef<any>(null);
   const decorationsCollection = useRef<any>(null);
   
+  const [chatPanelWidth, setChatPanelWidth] = useState(384);
+  const [isChatResizing, setIsChatResizing] = useState(false);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+        if (!isChatResizing) return;
+        const newWidth = document.body.clientWidth - e.clientX;
+        // Min width 384px (w-96), Max width constrained by window
+        if (newWidth >= 384 && newWidth < document.body.clientWidth - 100) {
+            setChatPanelWidth(newWidth);
+        }
+    };
+
+    const handleMouseUp = () => {
+        setIsChatResizing(false);
+        document.body.style.cursor = 'default';
+    };
+
+    if (isChatResizing) {
+        document.addEventListener('mousemove', handleMouseMove);
+        document.addEventListener('mouseup', handleMouseUp);
+        document.body.style.cursor = 'col-resize';
+    }
+
+    return () => {
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+        document.body.style.cursor = 'default';
+    };
+  }, [isChatResizing]);
+
+  const handleChatResizeStart = (e: React.MouseEvent) => {
+      e.preventDefault();
+      setIsChatResizing(true);
+  };
+
   // Debounce backup
   const backupTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -369,11 +405,21 @@ function App() {
       </div>
 
       {/* RIGHT: Agent Chat */}
-      <div className="w-96 h-full border-l border-gray-800 flex-shrink-0">
+      <div 
+        className={`w-1 hover:bg-blue-500 cursor-col-resize transition-colors z-50 flex-shrink-0 ${isChatResizing ? 'bg-blue-500' : 'bg-gray-800'}`}
+        onMouseDown={handleChatResizeStart}
+      />
+      <div 
+        style={{ width: chatPanelWidth }}
+        className="h-full flex-shrink-0"
+      >
         <ChatWindow />
       </div>
 
-      <TerminalPanel />
+      <TerminalPanel 
+          leftOffset={isSidebarCollapsed ? 48 : 320}
+          rightOffset={chatPanelWidth} 
+      />
     </div>
   );
 }
