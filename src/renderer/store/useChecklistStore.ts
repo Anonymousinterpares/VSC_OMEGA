@@ -7,6 +7,7 @@ interface ChecklistState {
   
   loadChecklist: () => Promise<void>;
   saveChecklist: (content: string) => Promise<void>;
+  clearChecklist: () => Promise<void>;
   toggleSelection: (lineText: string) => void;
   clearSelection: () => void;
 }
@@ -26,6 +27,13 @@ export const useChecklistStore = create<ChecklistState>((set, get) => ({
     if (window.electron) {
         await window.electron.ipcRenderer.invoke(CHANNELS.TO_MAIN.SAVE_CHECKLIST, content);
         set({ checklistContent: content });
+    }
+  },
+
+  clearChecklist: async () => {
+    if (window.electron) {
+        await window.electron.ipcRenderer.invoke(CHANNELS.TO_MAIN.SAVE_CHECKLIST, "");
+        set({ checklistContent: "", selectedItems: [] });
     }
   },
 

@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { useChecklistStore } from '../../store/useChecklistStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
-import { Play, Edit2, CheckSquare, Save } from 'lucide-react';
+import { Play, Edit2, CheckSquare, Save, Trash2 } from 'lucide-react';
 import { useViewStore } from '../../store/useViewStore';
 import { CHANNELS } from '../../../shared/constants';
 
 export const ChecklistPanel: React.FC = () => {
-    const { checklistContent, selectedItems, loadChecklist, saveChecklist, clearSelection, toggleSelection } = useChecklistStore();
+    const { checklistContent, selectedItems, loadChecklist, saveChecklist, clearChecklist, clearSelection, toggleSelection } = useChecklistStore();
     const { settings } = useSettingsStore();
     const { setActiveView } = useViewStore();
     
@@ -24,6 +24,13 @@ export const ChecklistPanel: React.FC = () => {
     const handleSave = async () => {
         await saveChecklist(editValue);
         setIsEditing(false);
+    };
+
+    const handleClear = async () => {
+        if (window.confirm("Are you sure you want to clear the entire checklist? This cannot be undone.")) {
+            await clearChecklist();
+            setIsEditing(false);
+        }
     };
 
     const handleStartSession = () => {
@@ -99,13 +106,22 @@ export const ChecklistPanel: React.FC = () => {
         <div className="flex flex-col h-full bg-[#252526] text-white">
             <div className="h-9 flex items-center justify-between px-4 bg-[#252526] text-gray-300 text-xs font-bold uppercase tracking-wider border-b border-gray-800">
                 <span>Master Checklist</span>
-                <button 
-                    onClick={() => setIsEditing(!isEditing)} 
-                    className={`p-1 hover:bg-gray-700 rounded ${isEditing ? 'text-blue-400' : ''}`}
-                    title="Edit Checklist"
-                >
-                    <Edit2 size={14} />
-                </button>
+                <div className="flex items-center gap-1">
+                    <button 
+                        onClick={handleClear} 
+                        className="p-1 hover:bg-red-900/40 hover:text-red-400 rounded transition-colors"
+                        title="Clear Checklist"
+                    >
+                        <Trash2 size={14} />
+                    </button>
+                    <button 
+                        onClick={() => setIsEditing(!isEditing)} 
+                        className={`p-1 hover:bg-gray-700 rounded ${isEditing ? 'text-blue-400' : ''}`}
+                        title="Edit Checklist"
+                    >
+                        <Edit2 size={14} />
+                    </button>
+                </div>
             </div>
 
             <div className="flex-1 overflow-y-auto custom-scrollbar">
