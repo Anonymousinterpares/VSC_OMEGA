@@ -20,7 +20,7 @@ function App() {
   const { selectedFile, unsavedFiles, setUnsavedFile, activeTabId, closeTab, tabs } = useFileStore(); // Updated Store
   const { addContextItem } = useContextStore();
   const { highlightTarget, setHighlightTarget } = useSearchStore();
-  const { activeView } = useViewStore();
+  const { activeView, isSidebarCollapsed } = useViewStore();
   const { setAgentPhase } = useExecutionStore();
   
   const [fileContent, setFileContent] = useState("// Welcome to The Hive");
@@ -325,7 +325,7 @@ function App() {
       <ReviewWindow />
 
       {/* LEFT SIDEBAR */}
-      <div className="w-80 border-r border-gray-800 bg-gray-900 flex-shrink-0">
+      <div className={`${isSidebarCollapsed ? 'w-12' : 'w-80'} border-r border-gray-800 bg-gray-900 flex-shrink-0 transition-all duration-300 ease-in-out`}>
          <Sidebar />
       </div>
 
