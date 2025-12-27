@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, ChevronDown, ChevronRight, Activity, Layers, RefreshCw, Square, Pause, Play, PlusCircle, Image as ImageIcon, X } from 'lucide-react';
+import { Send, ChevronDown, ChevronRight, Activity, Layers, RefreshCw, Square, Pause, Play, PlusCircle, Image as ImageIcon, X, Shield, FileText, Eye } from 'lucide-react';
 import { CHANNELS } from '@/shared/constants';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { useFileStore } from '../../store/useFileStore';
@@ -310,7 +310,7 @@ export const ChatWindow: React.FC = () => {
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const { settings } = useSettingsStore();
+  const { settings, saveSettings } = useSettingsStore();
   const { fileTree } = useFileStore();
   const { activeContext, clearContext, setContext } = useContextStore();
   const executionStatus = useExecutionStore(state => state.status);
@@ -822,6 +822,34 @@ export const ChatWindow: React.FC = () => {
         )}
 
         <div className="relative flex items-end space-x-2">
+           <div className="flex flex-col items-center mb-1">
+               <span className={`text-[8px] uppercase font-bold tracking-tighter mb-0.5 ${
+                   settings.operationMode === 'documentation' ? 'text-orange-500' :
+                   settings.operationMode === 'analysis' ? 'text-cyan-500' :
+                   'text-gray-500'
+               }`}>
+                   {settings.operationMode || 'standard'}
+               </span>
+               <button
+                   onClick={() => {
+                       const modes = ['standard', 'documentation', 'analysis'] as const;
+                       const currentIdx = modes.indexOf(settings.operationMode || 'standard');
+                       const nextIdx = (currentIdx + 1) % modes.length;
+                       saveSettings({ operationMode: modes[nextIdx] });
+                   }}
+                   className={`p-2 rounded transition-colors ${
+                       settings.operationMode === 'documentation' ? 'bg-orange-900/30 text-orange-400 hover:bg-orange-900/50' :
+                       settings.operationMode === 'analysis' ? 'bg-cyan-900/30 text-cyan-400 hover:bg-cyan-900/50' :
+                       'hover:bg-gray-800 text-gray-500 hover:text-gray-300'
+                   }`}
+                   title={`Current Mode: ${settings.operationMode || 'standard'} (Click to switch)`}
+               >
+                   {settings.operationMode === 'documentation' ? <FileText size={20} /> : 
+                    settings.operationMode === 'analysis' ? <Eye size={20} /> : 
+                    <Shield size={20} />}
+               </button>
+           </div>
+
            <input 
                type="file" 
                multiple 

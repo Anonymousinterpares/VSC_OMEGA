@@ -32,7 +32,7 @@ export class ToolHandler {
   private llm: LLMService;
   private mainWindow: BrowserWindow | null = null;
   private activeProcess: ChildProcessWithoutNullStreams | null = null;
-  private operationMode: 'standard' | 'documentation' = 'standard';
+  private operationMode: 'standard' | 'documentation' | 'analysis' = 'standard';
 
   constructor(fileSystem: FileSystemService, proposalManager: ProposalManager, browser: WebBrowserService, llm: LLMService, mainWindow?: BrowserWindow) {
     this.fileSystem = fileSystem;
@@ -42,7 +42,7 @@ export class ToolHandler {
     if (mainWindow) this.mainWindow = mainWindow;
   }
 
-  public setOperationMode(mode: 'standard' | 'documentation') {
+  public setOperationMode(mode: 'standard' | 'documentation' | 'analysis') {
       this.operationMode = mode;
   }
 
@@ -237,6 +237,13 @@ export class ToolHandler {
               action: null
           };
       }
+      if (this.operationMode === 'analysis') {
+          return {
+              llmOutput: `\n[Security Block] Command execution is DISABLED in Analysis Mode.\nYou are in Read-Only mode.`,
+              userOutput: `\n[Security Block] Command execution is disabled in Analysis Mode.`,
+              action: null
+          };
+      }
 
       // 1. Ask for permission (or check autoApply)
       if (!autoApply) {
@@ -374,6 +381,13 @@ export class ToolHandler {
                 action: null
             };
         }
+        if (this.operationMode === 'analysis') {
+            return {
+                llmOutput: `\n[Security Block] File writing is DISABLED in Analysis Mode.\nYou are in Read-Only mode.`,
+                userOutput: `\n[Security Block] Blocked write to '${cleanPath}' (Analysis Mode).`,
+                action: null
+            };
+        }
 
         if (autoApply) {
             await this.fileSystem.handleWriteFile(cleanPath, content);
@@ -425,6 +439,13 @@ export class ToolHandler {
               return {
                   llmOutput: `\n[Security Block] Modifying non-markdown file '${cleanPath}' is BLOCKED in Documentation Mode.`,
                   userOutput: `\n[Security Block] Blocked modification of '${cleanPath}' (Documentation Mode).`,
+                  action: null
+              };
+          }
+          if (this.operationMode === 'analysis') {
+              return {
+                  llmOutput: `\n[Security Block] File modification is DISABLED in Analysis Mode.\nYou are in Read-Only mode.`,
+                  userOutput: `\n[Security Block] Blocked modification of '${cleanPath}' (Analysis Mode).`,
                   action: null
               };
           }

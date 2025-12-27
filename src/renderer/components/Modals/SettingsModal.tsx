@@ -144,8 +144,15 @@ export const SettingsModal: React.FC = () => {
                             onClick={() => setOpMode('documentation')}
                             className={`flex-1 py-2 px-3 rounded border ${opMode === 'documentation' ? 'bg-orange-600 border-orange-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:bg-gray-800'}`}
                         >
-                            <div className="font-bold text-sm">Documentation</div>
-                            <div className="text-xs opacity-75">Read-Only + Markdown</div>
+                            <div className="font-bold text-sm">Docs</div>
+                            <div className="text-xs opacity-75">Read-Only + MD</div>
+                        </button>
+                        <button
+                            onClick={() => setOpMode('analysis')}
+                            className={`flex-1 py-2 px-3 rounded border ${opMode === 'analysis' ? 'bg-cyan-600 border-cyan-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:bg-gray-800'}`}
+                        >
+                            <div className="font-bold text-sm">Analysis</div>
+                            <div className="text-xs opacity-75">Read-Only Report</div>
                         </button>
                     </div>
                 </div>

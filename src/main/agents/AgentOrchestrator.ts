@@ -330,6 +330,8 @@ export class AgentOrchestrator {
     let modeSystemInject = "";
     if (operationMode === 'documentation') {
         modeSystemInject = "\n\n[SYSTEM NOTICE]: You are in DOCUMENTATION MODE. You may only read files and create/edit Markdown (.md) files. Do NOT attempt to modify code or run commands.";
+    } else if (operationMode === 'analysis') {
+        modeSystemInject = "\n\n[SYSTEM NOTICE]: You are in ANALYSIS MODE. You are a read-only analyst. You MUST NOT edit files or run commands. Your goal is to answer questions, analyze code, or produce plain text reports. Output your final answer as a clear, well-formatted plain text response. Do not produce JSON unless explicitly asked.";
     }
 
     let currentHistory = `${historyText}User Request: ${message}${modeSystemInject}`;
@@ -338,7 +340,8 @@ export class AgentOrchestrator {
     let finalContent = "";
 
     // In Solo mode, start with 'Solo'. In Agentic, start with 'Router'.
-    let nextAgent = isSoloMode ? 'Solo' : 'Router';
+    // If in Analysis Mode, we also force 'Solo' (acting as Analyst) to bypass Router decision logic.
+    let nextAgent = (isSoloMode || operationMode === 'analysis') ? 'Solo' : 'Router';
     let currentInput = message;
 
     while (loopCount < MAX_LOOPS) {
@@ -357,7 +360,24 @@ export class AgentOrchestrator {
               previewInput = currentHistory;
           } else if (nextAgent !== 'FINISH') {
               const agentDef = this.workflowService.getAgent(nextAgent);
-              previewSystemPrompt = agentDef?.systemPrompt || "";
+              let effectiveSystemPrompt = agentDef?.systemPrompt || "";
+              
+              // Override Prompt for Analysis Mode
+              if (operationMode === 'analysis') {
+                   effectiveSystemPrompt = `You are an expert Systems Analyst and Reporter.
+                   
+GOAL: Analyze the provided code/context and answer the User's Request in detail.
+
+CONSTRAINTS:
+- You are in READ-ONLY mode.
+- DO NOT write files or replace code.
+- DO NOT run terminal commands (except for <search> or <list_directory>).
+- Output PLAIN TEXT (Markdown) reports. DO NOT output JSON.
+
+TOOLS AVAILABLE: <read_file>, <search>, <list_directory>, <web_search>.`;
+              }
+              
+              previewSystemPrompt = effectiveSystemPrompt;
               previewInput = currentInput;
           }
 
@@ -381,7 +401,7 @@ export class AgentOrchestrator {
       loopCount++;
 
       // PRIORITY: If any task awaits review, force Reviewer (ONLY IN AGENTIC MODE)
-      if (!isSoloMode && this.currentTasks.some(t => t.status === 'review_pending') && nextAgent === 'Router') {
+      if (!isSoloMode && operationMode !== 'analysis' && this.currentTasks.some(t => t.status === 'review_pending') && nextAgent === 'Router') {
           nextAgent = 'Reviewer';
       }
 
@@ -489,9 +509,24 @@ export class AgentOrchestrator {
              break;
         }
 
-        const agentSystemPrompt = agentDef.systemPrompt;
+        let agentSystemPrompt = agentDef.systemPrompt;
+        
+        // Override for Analysis Mode
+        if (operationMode === 'analysis') {
+            agentSystemPrompt = `You are an expert Systems Analyst and Reporter.
+                   
+GOAL: Analyze the provided code/context and answer the User's Request in detail.
 
-        this.currentTurnStats.agent = nextAgent;
+CONSTRAINTS:
+- You are in READ-ONLY mode.
+- DO NOT write files or replace code.
+- DO NOT run terminal commands (except for <search> or <list_directory>).
+- Output PLAIN TEXT (Markdown) reports. DO NOT output JSON.
+
+TOOLS AVAILABLE: <read_file>, <search>, <list_directory>, <web_search>.`;
+        }
+
+        this.currentTurnStats.agent = nextAgent === 'Solo' && operationMode === 'analysis' ? 'Analyst' : nextAgent;
         let agentOutput = "";
 
         try {
