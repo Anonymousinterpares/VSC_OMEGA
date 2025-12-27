@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useWorkflowStore } from '../../store/useWorkflowStore';
 import { NodeGraph } from './NodeGraph';
 import { PropertiesPanel } from './PropertiesPanel';
@@ -16,9 +16,47 @@ export const WorkflowEditor: React.FC = () => {
     isLoading 
   } = useWorkflowStore();
 
+  const [panelWidth, setPanelWidth] = useState(384); // Default w-96
+  const [isDragging, setIsDragging] = useState(false);
+
   useEffect(() => {
     fetchWorkflow();
   }, []);
+
+  useEffect(() => {
+      const handleMouseMove = (e: MouseEvent) => {
+          if (!isDragging) return;
+          // Calculate new width: Window Width - Mouse X
+          // This assumes the panel is anchored to the right
+          const newWidth = document.body.clientWidth - e.clientX;
+          // Constraint: Min 100px, Max 80% of screen?
+          if (newWidth > 100 && newWidth < document.body.clientWidth - 100) {
+              setPanelWidth(newWidth);
+          }
+      };
+
+      const handleMouseUp = () => {
+          setIsDragging(false);
+          document.body.style.cursor = 'default';
+      };
+
+      if (isDragging) {
+          document.addEventListener('mousemove', handleMouseMove);
+          document.addEventListener('mouseup', handleMouseUp);
+          document.body.style.cursor = 'col-resize';
+      }
+
+      return () => {
+          document.removeEventListener('mousemove', handleMouseMove);
+          document.removeEventListener('mouseup', handleMouseUp);
+          document.body.style.cursor = 'default';
+      };
+  }, [isDragging]);
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+      e.preventDefault();
+      setIsDragging(true);
+  };
 
   const handleSave = () => {
     if (workflow) saveWorkflow(workflow);
@@ -68,7 +106,16 @@ export const WorkflowEditor: React.FC = () => {
         <div className="flex-1 relative">
             <NodeGraph />
         </div>
-        <PropertiesPanel />
+        
+        {/* Resizer */}
+        <div 
+            className={`w-1 cursor-col-resize hover:bg-blue-500 transition-colors z-40 ${isDragging ? 'bg-blue-500' : 'bg-slate-700'}`}
+            onMouseDown={handleMouseDown}
+        />
+
+        <div style={{ width: panelWidth }} className="flex-shrink-0 h-full overflow-x-auto overflow-y-hidden bg-slate-800 relative">
+            <PropertiesPanel />
+        </div>
       </div>
     </div>
   );

@@ -34,7 +34,7 @@ export const PropertiesPanel: React.FC = () => {
 
   if (!selectedAgent || !workflow) {
     return (
-      <div className="w-80 h-full bg-slate-800 border-l border-slate-700 p-6 flex items-center justify-center text-slate-500">
+      <div className="w-full h-full min-w-[24rem] bg-slate-800 p-6 flex items-center justify-center text-slate-500">
         Select a node to edit properties
       </div>
     );
@@ -58,7 +58,7 @@ export const PropertiesPanel: React.FC = () => {
   };
 
   return (
-    <div className="w-96 h-full bg-slate-800 border-l border-slate-700 flex flex-col shadow-2xl z-20">
+    <div className="w-full h-full min-w-[24rem] bg-slate-800 flex flex-col shadow-2xl z-20">
       <div className="p-4 border-b border-slate-700 flex justify-between items-center" style={{ borderLeft: `4px solid ${selectedAgent.color}` }}>
         <div>
           <h2 className="text-white font-bold text-lg">{selectedAgent.name}</h2>
