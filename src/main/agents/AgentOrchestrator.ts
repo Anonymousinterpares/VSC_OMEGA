@@ -455,6 +455,16 @@ TOOLS AVAILABLE: <read_file>, <search>, <list_directory>, <web_search>.`;
                 this.projectWorkingSet.set(path, content);
                 streamBuffer = streamBuffer.replace(fullMatch, ""); 
                 toolExecuted = true;
+            } else if (tags.patch) {
+                const [fullMatch, path, patchContent] = tags.patch;
+                this.emitPhase('EXECUTING_TOOL', `Patching file: ${path}`);
+                result = await this.tools.executePatch(path, patchContent, autoApply);
+                if (result) {
+                   const fullContent = await this.fileSystem.handleReadFile(path);
+                   this.projectWorkingSet.set(path, fullContent);
+                }
+                streamBuffer = streamBuffer.replace(fullMatch, "");
+                toolExecuted = true;
             } else if (tags.replace) {
                 const [fullMatch, path, oldStr, newStr] = tags.replace;
                 this.emitPhase('EXECUTING_TOOL', `Patching file: ${path}`);

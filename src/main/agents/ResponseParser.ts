@@ -8,6 +8,7 @@ export class ResponseParser {
         return {
             write: /<write_file path="([^"]+)">([\s\S]*?)<\/write_file>/.exec(text),
             replace: /<replace path="([^"]+)">\s*<old>([\s\S]*?)<\/old>\s*<new>([\s\S]*?)<\/new>\s*<\/replace>/.exec(text),
+            patch: /<patch path="([^"]+)">([\s\S]*?)<\/patch>/.exec(text),
             read: /<read_file>(.*?)<\/read_file>/.exec(text),
             execute: /<execute_command(?:\s+background=["'](true|false)["'])?>([\s\S]*?)<\/execute_command>/.exec(text),
             genImage: /<generate_image\s+prompt="([^"]+)"(?:\s+aspect_ratio="([^"]+)")?\s*\/>/.exec(text),

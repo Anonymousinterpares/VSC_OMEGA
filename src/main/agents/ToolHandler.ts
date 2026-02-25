@@ -7,9 +7,10 @@ import { CHANNELS } from '../../shared/constants';
 import { BrowserWindow } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs-extra';
+import { applyPatch } from 'diff';
 
 export interface IToolAction {
-    type: 'write' | 'read' | 'replace' | 'execute' | 'web_search' | 'visit_page' | 'generate_image' | 'resize_image' | 'save_asset';
+    type: 'write' | 'read' | 'replace' | 'patch' | 'execute' | 'web_search' | 'visit_page' | 'generate_image' | 'resize_image' | 'save_asset';
     path: string;
 }
 
@@ -430,12 +431,83 @@ export class ToolHandler {
       }
   }
 
+  async executePatch(filePath: string, patchContent: string, autoApply: boolean): Promise<ISingleToolResult> {
+    try {
+        const cleanPath = filePath.trim();
+        // 0. Security Check
+        if (this.operationMode === 'documentation' && !cleanPath.toLowerCase().endsWith('.md')) {
+            return {
+                llmOutput: `\n[Security Block] Modifying non-markdown file '${cleanPath}' is BLOCKED in Documentation Mode.`,
+                userOutput: `\n[Security Block] Blocked modification of '${cleanPath}' (Documentation Mode).`,
+                action: null
+            };
+        }
+        if (this.operationMode === 'analysis') {
+            return {
+                llmOutput: `\n[Security Block] File modification is DISABLED in Analysis Mode.`,
+                userOutput: `\n[Security Block] Blocked modification of '${cleanPath}' (Analysis Mode).`,
+                action: null
+            };
+        }
+
+        const currentContent = await this.fileSystem.handleReadFile(cleanPath);
+        
+        // Use applyPatch from 'diff' library
+        const patchedContent = applyPatch(currentContent, patchContent);
+
+        if (patchedContent === false) {
+             return {
+                llmOutput: `\n[System Error] Patch failed for ${cleanPath}. The Unified Diff provided does not match the current file content. Ensure you are using the latest file content and that the hunk headers (@@ -L,C +L,C @@) and context lines match exactly.`,
+                userOutput: `\n[System Error] Patch failed for ${cleanPath}.`,
+                action: null
+            };
+        }
+
+        if (autoApply) {
+            await this.fileSystem.handleWriteFile(cleanPath, patchedContent);
+            return {
+                llmOutput: `\n[System] Successfully patched ${cleanPath} using Unified Diff.`,
+                userOutput: `\n[System] Successfully patched ${cleanPath}.`,
+                action: { type: 'patch', path: cleanPath }
+            };
+        } else {
+            const result = await this.proposalManager.requestApproval({
+                id: Date.now().toString(),
+                type: 'edit',
+                path: cleanPath,
+                original: currentContent,
+                modified: patchedContent
+            });
+
+            if (result.status === 'accepted') {
+                await this.fileSystem.handleWriteFile(cleanPath, result.content || patchedContent);
+                return {
+                    llmOutput: `\n[System] User APPROVED patch to ${cleanPath}`,
+                    userOutput: `\n[System] User APPROVED patch to ${cleanPath}`,
+                    action: { type: 'patch', path: cleanPath }
+                };
+            } else {
+                return {
+                    llmOutput: `\n[System] User REJECTED patch to ${cleanPath}`,
+                    userOutput: `\n[System] User REJECTED patch to ${cleanPath}`,
+                    action: null
+                };
+            }
+        }
+    } catch (e: any) {
+        return {
+            llmOutput: `\n[System Error] Error applying patch to ${filePath}: ${e.message}`,
+            userOutput: `\n[System Error] Error patching ${filePath}`,
+            action: null
+        };
+    }
+  }
+
   async executeReplace(path: string, oldString: string, newString: string, autoApply: boolean): Promise<ISingleToolResult> {
       try {
           const cleanPath = path.trim();
           // 0. Security Check
           if (this.operationMode === 'documentation' && !cleanPath.toLowerCase().endsWith('.md')) {
-              console.log(`[ToolHandler] BLOCKED replace in ${cleanPath} in Documentation Mode.`);
               return {
                   llmOutput: `\n[Security Block] Modifying non-markdown file '${cleanPath}' is BLOCKED in Documentation Mode.`,
                   userOutput: `\n[Security Block] Blocked modification of '${cleanPath}' (Documentation Mode).`,
@@ -444,31 +516,22 @@ export class ToolHandler {
           }
           if (this.operationMode === 'analysis') {
               return {
-                  llmOutput: `\n[Security Block] File modification is DISABLED in Analysis Mode.\nYou are in Read-Only mode.`,
+                  llmOutput: `\n[Security Block] File modification is DISABLED in Analysis Mode.`,
                   userOutput: `\n[Security Block] Blocked modification of '${cleanPath}' (Analysis Mode).`,
                   action: null
               };
           }
 
           const currentContent = await this.fileSystem.handleReadFile(cleanPath);
-          let targetBlock = oldString;
-          let matchFound = false;
+          
+          // Improved Matching Strategy
+          const fuzzyMatch = this.findFuzzyBlock(currentContent, oldString);
+          
+          if (fuzzyMatch) {
+              const targetBlock = fuzzyMatch;
+              const newContent = currentContent.replace(targetBlock, newString);
 
-          // Try Exact Match
-          if (currentContent.includes(oldString)) {
-              matchFound = true;
-          } else {
-              // Try Fuzzy Match
-              const fuzzyMatch = this.findFuzzyBlock(currentContent, oldString);
-              if (fuzzyMatch) {
-                  targetBlock = fuzzyMatch;
-                  matchFound = true;
-              }
-          }
-
-          if (matchFound) {
               if (autoApply) {
-                  const newContent = currentContent.replace(targetBlock, newString);
                   await this.fileSystem.handleWriteFile(cleanPath, newContent);
                   return {
                       llmOutput: `\n[System] Successfully patched ${cleanPath}`,
@@ -476,18 +539,16 @@ export class ToolHandler {
                       action: { type: 'replace', path: cleanPath }
                   };
               } else {
-                  // PROPOSE EDIT
-                  const proposedContent = currentContent.replace(targetBlock, newString);
                   const result = await this.proposalManager.requestApproval({
                       id: Date.now().toString(),
                       type: 'edit',
                       path: cleanPath,
                       original: currentContent,
-                      modified: proposedContent
+                      modified: newContent
                   });
 
                   if (result.status === 'accepted') {
-                      await this.fileSystem.handleWriteFile(cleanPath, result.content || proposedContent);
+                      await this.fileSystem.handleWriteFile(cleanPath, result.content || newContent);
                       return {
                           llmOutput: `\n[System] User APPROVED edit to ${cleanPath}`,
                           userOutput: `\n[System] User APPROVED edit to ${cleanPath}`,
@@ -502,16 +563,17 @@ export class ToolHandler {
                   }
               }
           } else {
+               // Enhanced error reporting with context
                return {
-                   llmOutput: `\n[System] Replace failed: 'old' string not found in ${cleanPath}. \n\nHINT: Ensure <old> tag content matches the file EXACTLY, including whitespace and indentation.`,
-                   userOutput: `\n[System] Replace failed: 'old' string not found in ${cleanPath}.`,
+                   llmOutput: `\n[System Error] Replace failed: The <old> block was not found in ${cleanPath}.\n\nHELP: Ensure the <old> block matches the file content EXACTLY, including whitespace, comments, and indentation. If the file is large, provide more context lines in your <old> block to make it unique.`,
+                   userOutput: `\n[System Error] Replace failed in ${cleanPath}: block not found.`,
                    action: null
                };
           }
       } catch (e: any) {
           return {
-              llmOutput: `\n[System] Error replacing in ${path}: ${e.message}`,
-              userOutput: `\n[System] Error replacing in ${path}: ${e.message}`,
+              llmOutput: `\n[System Error] Error replacing in ${path}: ${e.message}`,
+              userOutput: `\n[System Error] Error replacing in ${path}`,
               action: null
           };
       }
@@ -639,7 +701,18 @@ export class ToolHandler {
       if (res.action) actions.push(res.action);
     }
 
-    // 5. Handle <replace> (Diffs)
+    // 5a. Handle <patch> (Unified Diffs)
+    const patchRegex = /<patch path="([^"]+)">([\s\S]*?)<\/patch>/g;
+    let patchMatch;
+    while ((patchMatch = patchRegex.exec(response)) !== null) {
+        toolsFound = true;
+        const res = await this.executePatch(patchMatch[1], patchMatch[2], autoApply);
+        llmOutputAccumulator += res.llmOutput;
+        userOutputAccumulator += res.userOutput;
+        if (res.action) actions.push(res.action);
+    }
+
+    // 5b. Handle <replace> (Legacy Diffs)
     const replaceRegex = /<replace path="([^"]+)">\s*<old>([\s\S]*?)<\/old>\s*<new>([\s\S]*?)<\/new>\s*<\/replace>/g;
     let replaceMatch;
     while ((replaceMatch = replaceRegex.exec(response)) !== null) {
@@ -702,53 +775,49 @@ export class ToolHandler {
     };
   }
 
-  // --- FUZZY MATCHING HELPERS ---
+  // --- ROBUST MATCHING HELPER ---
 
   private findFuzzyBlock(fileContent: string, searchBlock: string): string | null {
-      const normalize = (line: string) => line.trim();
-      const fileLines = fileContent.split('\n');
-      const searchLines = searchBlock.split('\n').filter(l => l.trim() !== ''); // Ignore empty lines in search block
+      // 1. Exact match (fast path)
+      if (fileContent.includes(searchBlock)) return searchBlock;
 
-      if (searchLines.length === 0) return null;
+      // 2. Normalize and check
+      const normalize = (text: string) => text.replace(/\r\n/g, '\n').trim();
+      const normalizedFile = normalize(fileContent);
+      const normalizedSearch = normalize(searchBlock);
 
-      // Brute force line-by-line match ignoring whitespace
-      for (let i = 0; i <= fileLines.length - searchLines.length; i++) {
-          let match = true;
-          // We need to advance 'j' (searchLines index) and 'k' (fileLines index) separately
-          // because file might have extra empty lines that we want to skip?
-          // OR assume strict vertical alignment of non-empty lines? 
-          // Let's assume strict alignment of non-empty lines for now.
-          
-          let fileIndex = i;
-          let matchCount = 0;
-          
-          for (let j = 0; j < searchLines.length; j++) {
-             // Skip empty lines in file while matching?
-             while (fileIndex < fileLines.length && fileLines[fileIndex].trim() === '') {
-                 fileIndex++;
-             }
-             
-             if (fileIndex >= fileLines.length) {
-                 match = false;
-                 break;
-             }
+      if (normalizedFile.includes(normalizedSearch)) {
+          // If normalized match works, we still need to find the EXACT original text in the file.
+          // This is tricky because we normalized. Let's try a sliding window on lines.
+          const fileLines = fileContent.split(/\r?\n/);
+          const searchLines = searchBlock.split(/\r?\n/).map(l => l.trim()).filter(l => l !== '');
 
-             if (normalize(fileLines[fileIndex]) !== normalize(searchLines[j])) {
-                 match = false;
-                 break;
-             }
-             fileIndex++;
-             matchCount++;
-          }
+          if (searchLines.length === 0) return null;
 
-          if (match && matchCount === searchLines.length) {
-              // Found a match!
-              // The block starts at 'i' (original index) and ends at 'fileIndex - 1'.
-              // We must return the EXACT text from the file including whitespace/newlines.
-              // Note: 'fileIndex' is currently pointing AFTER the last matched line.
-              return fileLines.slice(i, fileIndex).join('\n');
+          for (let i = 0; i <= fileLines.length - searchLines.length; i++) {
+              let match = true;
+              let fileLineIndex = i;
+              
+              for (let j = 0; j < searchLines.length; j++) {
+                  // Skip empty lines in file
+                  while (fileLineIndex < fileLines.length && fileLines[fileLineIndex].trim() === '') {
+                      fileLineIndex++;
+                  }
+
+                  if (fileLineIndex >= fileLines.length || fileLines[fileLineIndex].trim() !== searchLines[j]) {
+                      match = false;
+                      break;
+                  }
+                  fileLineIndex++;
+              }
+
+              if (match) {
+                  return fileLines.slice(i, fileLineIndex).join('\n');
+              }
           }
       }
+
       return null;
   }
+
 }
