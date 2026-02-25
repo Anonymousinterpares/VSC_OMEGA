@@ -1,6 +1,5 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import { app, BrowserWindow } from 'electron';
 import path from 'path';
-import * as fs from 'fs-extra';
 import { FileSystemService } from './services/FileSystem';
 import { SettingsService } from './services/SettingsService';
 import { LLMService } from './services/LLMService';
@@ -10,6 +9,12 @@ import { CHANNELS } from '../shared/constants';
 import { AgentOrchestrator } from './agents/AgentOrchestrator';
 import { ProposalManager } from './services/ProposalManager';
 import { WorkflowService } from './services/WorkflowService';
+
+// Controllers
+import { FileIPCController } from './controllers/FileIPCController';
+import { AgentIPCController } from './controllers/AgentIPCController';
+import { SettingsIPCController } from './controllers/SettingsIPCController';
+import { AssetIPCController } from './controllers/AssetIPCController';
 
 let mainWindow: BrowserWindow | null = null;
 let fileSystemService: FileSystemService;
@@ -51,240 +56,26 @@ app.whenReady().then(() => {
   // Initialize Services
   settingsService = new SettingsService();
   fileSystemService = new FileSystemService(mainWindow);
-  new SyntaxService(); // Self-registering IPC handlers
+  new SyntaxService(); 
   llmService = new LLMService(settingsService);
   proposalManager = new ProposalManager(mainWindow);
-  workflowService = new WorkflowService(process.cwd()); // Use CWD for workflow.json
+  workflowService = new WorkflowService(process.cwd()); 
   orchestrator = new AgentOrchestrator(llmService, fileSystemService, workflowService, settingsService, mainWindow, proposalManager);
 
-  // IPC Handlers
-  ipcMain.on(CHANNELS.TO_MAIN.OPEN_FOLDER, () => fileSystemService.handleOpenFolder());
-  
-  ipcMain.handle(CHANNELS.TO_MAIN.READ_FILE, async (_, filePath) => {
-    return await fileSystemService.handleReadFile(filePath);
-  });
-  
-  ipcMain.handle(CHANNELS.TO_MAIN.WRITE_FILE, async (_, { filePath, content }) => {
-    return await fileSystemService.handleWriteFile(filePath, content);
-  });
+  // Initialize IPC Controllers (Self-registering)
+  new FileIPCController(fileSystemService, mainWindow);
+  new AgentIPCController(orchestrator, proposalManager);
+  new SettingsIPCController(settingsService, workflowService, fileSystemService);
+  new AssetIPCController();
 
-  ipcMain.handle(CHANNELS.TO_MAIN.SEARCH_IN_FILES, async (_, options) => {
-    return await fileSystemService.handleSearch(options);
-  });
-
-  ipcMain.handle(CHANNELS.TO_MAIN.REPLACE_IN_FILES, async (_, { options, replaceText }) => {
-    return await fileSystemService.handleReplace(options, replaceText);
-  });
-
-  ipcMain.on(CHANNELS.TO_MAIN.BACKUP_FILE, async (_, { filePath, content }) => {
-      await fileSystemService.handleBackupFile(filePath, content);
-  });
-
-  ipcMain.handle(CHANNELS.TO_MAIN.GET_BACKUPS, async () => {
-      return await fileSystemService.getBackups();
-  });
-
-  ipcMain.handle(CHANNELS.TO_MAIN.RESTORE_BACKUP, async (_, filePath) => {
-      return await fileSystemService.handleRestoreBackup(filePath);
-  });
-
-  ipcMain.handle(CHANNELS.TO_MAIN.GET_SETTINGS, async () => {
-    return await settingsService.getSettings();
-  });
-
-  ipcMain.handle(CHANNELS.TO_MAIN.SAVE_SETTINGS, async (_, newSettings) => {
-    return await settingsService.saveSettings(newSettings);
-  });
-
-  ipcMain.handle(CHANNELS.TO_MAIN.GET_INSTRUCTIONS, async () => {
-      const userDataPath = app.getPath('userData');
-      const globalPath = path.join(userDataPath, 'global_instructions.md');
-      
-      let globalContent = "";
-      if (await fs.pathExists(globalPath)) {
-          globalContent = await fs.readFile(globalPath, 'utf-8');
-      }
-
-      let projectContent = "";
-      const projectRoot = fileSystemService.getProjectRoot();
-      if (projectRoot) {
-          const projectPath = path.join(projectRoot, '.gemini', 'instructions.md');
-          if (await fs.pathExists(projectPath)) {
-              projectContent = await fs.readFile(projectPath, 'utf-8');
-          }
-      }
-
-      return { global: globalContent, project: projectContent };
-  });
-
-  ipcMain.handle(CHANNELS.TO_MAIN.SAVE_INSTRUCTIONS, async (_, { type, content }) => {
-      let targetPath = "";
-      if (type === 'global') {
-          const userDataPath = app.getPath('userData');
-          targetPath = path.join(userDataPath, 'global_instructions.md');
-      } else {
-          const projectRoot = fileSystemService.getProjectRoot();
-          if (!projectRoot) throw new Error("No project open");
-          targetPath = path.join(projectRoot, '.gemini', 'instructions.md');
-      }
-
-      await fs.ensureDir(path.dirname(targetPath));
-      await fs.writeFile(targetPath, content, 'utf-8');
-      return { success: true };
-  });
-
-  ipcMain.handle(CHANNELS.TO_MAIN.GET_CHECKLIST, async () => {
-      const projectRoot = fileSystemService.getProjectRoot();
-      if (!projectRoot) return "";
-      
-      const checklistPath = path.join(projectRoot, '.gemini', 'checklist.md');
-      if (await fs.pathExists(checklistPath)) {
-          return await fs.readFile(checklistPath, 'utf-8');
-      }
-      return "";
-  });
-
-  ipcMain.handle(CHANNELS.TO_MAIN.SAVE_CHECKLIST, async (_, content) => {
-      const projectRoot = fileSystemService.getProjectRoot();
-      if (!projectRoot) throw new Error("No project open");
-      
-      const checklistPath = path.join(projectRoot, '.gemini', 'checklist.md');
-      await fs.ensureDir(path.dirname(checklistPath));
-      await fs.writeFile(checklistPath, content, 'utf-8');
-      return { success: true };
-  });
-
-  ipcMain.handle(CHANNELS.TO_MAIN.SEND_MESSAGE, async (_, { agent, message, context, history }) => {
-      // Route through Orchestrator
-      return await orchestrator.handleMessage({ agent, message, context, history });
-  });
-
-  ipcMain.handle(CHANNELS.TO_MAIN.ABORT_WORKFLOW, async () => {
-      orchestrator.stop();
-      return { success: true };
-  });
-
-  ipcMain.handle(CHANNELS.TO_MAIN.COMPRESS_CONTEXT, async (_, messages) => {
-      return await orchestrator.compressHistory(messages);
-  });
-
-  ipcMain.handle(CHANNELS.TO_MAIN.RESET_SESSION, async () => {
-      orchestrator.reset();
-      return { success: true };
-  });
-
-  // Handle Review Decisions from UI
-  ipcMain.handle(CHANNELS.TO_MAIN.REVIEW_DECISION, async (_, { id, status, content }) => {
-      proposalManager.resolveProposal(id, status, content);
-      return { success: true };
-  });
-
-  ipcMain.handle(CHANNELS.TO_MAIN.TASK_CONFIRMATION_DECISION, async (_, { id, status, comment }) => {
-      proposalManager.resolveTaskConfirmation(id, status, comment);
-      return { success: true };
-  });
-
-  // Workflow Handlers
-  ipcMain.handle(CHANNELS.TO_MAIN.GET_WORKFLOW, async () => {
-      return await workflowService.loadWorkflow();
-  });
-
-  ipcMain.handle(CHANNELS.TO_MAIN.SAVE_WORKFLOW, async (_, workflow) => {
-      await workflowService.saveWorkflow(workflow);
-      return { success: true };
-  });
-
-  ipcMain.handle(CHANNELS.TO_MAIN.RESET_WORKFLOW, async () => {
-      workflowService.resetToDefault();
-      return workflowService.getCurrentWorkflow();
-  });
-
-  ipcMain.handle(CHANNELS.TO_MAIN.UNDO_WORKFLOW, async () => {
-      return workflowService.undo();
-  });
-
-  ipcMain.handle(CHANNELS.TO_MAIN.REDO_WORKFLOW, async () => {
-      return workflowService.redo();
-  });
-
-  ipcMain.handle(CHANNELS.TO_MAIN.PAUSE_WORKFLOW, async () => {
-      orchestrator.pause();
-      return { success: true };
-  });
-
-  ipcMain.handle(CHANNELS.TO_MAIN.RESUME_WORKFLOW, async () => {
-      orchestrator.resume();
-      return { success: true };
-  });
-
-  // Asset Handlers
-  ipcMain.handle(CHANNELS.TO_MAIN.SAVE_TEMP_IMAGE, async (_, { name, data }) => {
-      try {
-          // data is expected to be a base64 string or buffer
-          const buffer = Buffer.from(data.replace(/^data:image\/\w+;base64,/, ""), 'base64');
-          const projectRoot = process.cwd();
-          const uploadsDir = path.join(projectRoot, '.gemini', 'tmp', 'uploads');
-          await fs.ensureDir(uploadsDir);
-          
-          const uniqueName = `${Date.now()}_${name}`;
-          const filePath = path.join(uploadsDir, uniqueName);
-          
-          await fs.writeFile(filePath, buffer);
-          return { success: true, path: filePath };
-      } catch (err: any) {
-          console.error("Failed to save temp image:", err);
-          return { success: false, error: err.message };
-      }
-  });
-
-  // Terminal Handlers
-  ipcMain.on(CHANNELS.TO_MAIN.KILL_PROCESS, () => {
-      orchestrator.killActiveProcess();
-  });
-
-  ipcMain.on(CHANNELS.TO_MAIN.TERMINAL_INPUT, (_, { data }) => {
-      orchestrator.writeToProcess(data);
-  });
-
-  // Handle App Closing
+  // Handle App Closing (Dirty Check Trigger)
   let isQuitting = false;
   mainWindow.on('close', (e) => {
       if (isQuitting) return;
 
       e.preventDefault();
-      
       // Send request to renderer to check for dirty files
       mainWindow?.webContents.send(CHANNELS.TO_RENDERER.DIRTY_CHECK_REQUEST);
-  });
-
-  // Handle response from Renderer regarding dirty state
-  ipcMain.on(CHANNELS.TO_MAIN.CHECK_DIRTY, async (_, { isDirty, unsavedCount }) => {
-      if (isDirty) {
-          const response = await dialog.showMessageBox(mainWindow!, {
-              type: 'warning',
-              buttons: ['Save All & Exit', 'Exit without Saving', 'Cancel'],
-              defaultId: 0,
-              cancelId: 2,
-              title: 'Unsaved Changes',
-              message: `You have ${unsavedCount} unsaved file(s).`,
-              detail: 'Do you want to save your changes before exiting?'
-          });
-
-          if (response.response === 0) {
-              await fileSystemService.commitBackupsToFiles();
-              isQuitting = true;
-              app.quit();
-
-          } else if (response.response === 1) {
-              // Exit without Saving
-              isQuitting = true;
-              app.quit();
-          } 
-          // Case 2: Cancel - do nothing, stay open
-      } else {
-          isQuitting = true;
-          app.quit();
-      }
   });
 
   // LOAD APP CONTENT NOW - AFTER ALL HANDLERS ARE REGISTERED
