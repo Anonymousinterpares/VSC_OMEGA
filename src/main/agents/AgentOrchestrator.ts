@@ -38,7 +38,6 @@ export class AgentOrchestrator {
 
   private mainWindow: BrowserWindow | null;
   private currentTasks: ITask[] = [];
-  private proposalManager: ProposalManager;
   private abortController: AbortController | null = null;
 
   // Pause State
@@ -62,7 +61,6 @@ export class AgentOrchestrator {
     this.workflowService = workflowService;
     this.settingsService = settingsService;
     this.mainWindow = mainWindow;
-    this.proposalManager = proposalManager;
     
     // Instantiate dependencies
     const browserService = new WebBrowserService(settingsService);
