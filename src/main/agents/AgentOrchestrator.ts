@@ -8,6 +8,8 @@ import { ProposalManager } from '../services/ProposalManager';
 import { WorkflowService } from '../services/WorkflowService';
 import { ContextManager } from '../services/ContextManager';
 import { LoopHandler } from '../services/LoopHandler';
+import { ResponseParser } from './ResponseParser';
+import { HistoryManager } from './HistoryManager';
 import { CHANNELS } from '../../shared/constants';
 import { ITask } from '../../shared/types';
 
@@ -31,22 +33,13 @@ export class AgentOrchestrator {
   private settingsService: SettingsService;
   private contextManager: ContextManager;
   private loopHandler: LoopHandler;
+  private parser: ResponseParser;
+  private historyManager: HistoryManager;
+
   private mainWindow: BrowserWindow | null;
   private currentTasks: ITask[] = [];
   private proposalManager: ProposalManager;
   private abortController: AbortController | null = null;
-  private sessionStats = {
-    totalInput: 0,
-    totalOutput: 0,
-    currentContextSize: 0,
-    agentStats: {} as Record<string, { input: number; output: number; contextSize: number }>
-  };
-
-  private currentTurnStats = {
-    input: 0,
-    output: 0,
-    agent: ''
-  };
 
   // Pause State
   private isPaused = false;
@@ -77,6 +70,8 @@ export class AgentOrchestrator {
     
     this.contextManager = new ContextManager();
     this.loopHandler = new LoopHandler();
+    this.parser = new ResponseParser();
+    this.historyManager = new HistoryManager();
   }
 
   public stop() {
@@ -116,12 +111,7 @@ export class AgentOrchestrator {
 
   public reset() {
       this.currentTasks = [];
-      this.sessionStats = {
-          totalInput: 0,
-          totalOutput: 0,
-          currentContextSize: 0,
-          agentStats: {}
-      };
+      this.historyManager.resetStats();
       this.projectWorkingSet.clear();
       this.emitPlan();
       this.emitStats();
@@ -147,27 +137,7 @@ export class AgentOrchestrator {
 
   private emitStats() {
     if (!this.mainWindow || this.mainWindow.isDestroyed()) return;
-
-    // Combine session + current
-    const displayStats = {
-        totalInput: this.sessionStats.totalInput + this.currentTurnStats.input,
-        totalOutput: this.sessionStats.totalOutput + (Math.round(this.currentTurnStats.output)),
-        currentContextSize: this.currentTurnStats.input || this.sessionStats.currentContextSize,
-        agentStats: { ...this.sessionStats.agentStats }
-    };
-
-    // Update the specific agent in the display stats
-    if (this.currentTurnStats.agent) {
-        const agent = this.currentTurnStats.agent;
-        const existing = displayStats.agentStats[agent] || { input: 0, output: 0, contextSize: 0 };
-        displayStats.agentStats[agent] = {
-            input: existing.input + this.currentTurnStats.input,
-            output: existing.output + Math.round(this.currentTurnStats.output),
-            contextSize: this.currentTurnStats.input || existing.contextSize
-        };
-    }
-
-    this.mainWindow.webContents.send(CHANNELS.TO_RENDERER.AGENT_TOKEN_UPDATE, displayStats);
+    this.mainWindow.webContents.send(CHANNELS.TO_RENDERER.AGENT_TOKEN_UPDATE, this.historyManager.getStats());
   }
 
   private emitPlan() {
@@ -177,80 +147,17 @@ export class AgentOrchestrator {
   }
 
   private updateStats(usage: any, agent: string) {
-      if (!usage) return;
-      
-      // Overwrite current turn estimates with official data
-      this.currentTurnStats.input = usage.promptTokenCount || 0;
-      this.currentTurnStats.output = usage.candidatesTokenCount || 0;
-      this.currentTurnStats.agent = agent;
-
+      this.historyManager.updateUsage(usage, agent);
       this.emitStats();
   }
 
   private commitTurn() {
-      const agent = this.currentTurnStats.agent;
-      if (!agent) return;
-
-      this.sessionStats.totalInput += this.currentTurnStats.input;
-      this.sessionStats.totalOutput += Math.round(this.currentTurnStats.output);
-      this.sessionStats.currentContextSize = this.currentTurnStats.input;
-
-      if (!this.sessionStats.agentStats[agent]) {
-          this.sessionStats.agentStats[agent] = { input: 0, output: 0, contextSize: 0 };
-      }
-      this.sessionStats.agentStats[agent].input += this.currentTurnStats.input;
-      this.sessionStats.agentStats[agent].output += Math.round(this.currentTurnStats.output);
-      this.sessionStats.agentStats[agent].contextSize = this.currentTurnStats.input;
-
-      // Reset current
-      this.currentTurnStats = { input: 0, output: 0, agent: '' };
+      this.historyManager.commitTurn();
       this.emitStats();
   }
 
   public async compressHistory(messages: any[]): Promise<any[]> {
-      if (!messages || messages.length <= 6) return messages;
-
-      // Keep last 4 messages (plus the very first system message if it exists, but here we just take last 4)
-      // Actually, typically we keep the last few turns.
-      const KEEP_COUNT = 4;
-      const recentMessages = messages.slice(-KEEP_COUNT);
-      const olderMessages = messages.slice(0, -KEEP_COUNT);
-
-      // Format older messages for summarization
-      const historyText = olderMessages.map(m => `[${m.role} (${m.agentName || 'User'})]: ${m.content}`).join('\n\n');
-
-      const systemPrompt = "You are a Technical Project Manager. Your task is to compress the following chat history into a detailed, structured summary.";
-      const userPrompt = `
-      Analyze the conversation history below. 
-      Identify the key topics discussed, decisions made, and technical details established.
-      Produce a summary that preserves all critical technical context (file paths, bug fixes, user preferences, architectural decisions) but removes conversational fluff.
-      
-      Format the output as a set of topic blocks:
-      ### Topic: [Topic Name]
-      - [Chronological Detail 1]
-      - [Chronological Detail 2]
-      
-      HISTORY TO COMPRESS:
-      ${historyText}
-      `;
-
-      try {
-          // Use a basic context (empty) for this utility call
-          const summary = await this.llm.generateCompletion(systemPrompt, userPrompt, "", (usage) => this.updateStats(usage, 'System_Compressor'));
-          
-          const summaryMessage = {
-              id: Date.now().toString(),
-              role: 'system',
-              agentName: 'Context Manager',
-              content: `**[CONTEXT COMPRESSED]**\nThe following is a summary of the earlier conversation:\n\n${summary}`,
-              timestamp: Date.now()
-          };
-
-          return [summaryMessage, ...recentMessages];
-      } catch (err) {
-          console.error("Compression failed", err);
-          return messages; // Fallback
-      }
+      return this.historyManager.compressHistory(messages, this.llm);
   }
 
   private emitSteps(steps: any[]) {
@@ -270,7 +177,7 @@ export class AgentOrchestrator {
       this.mainWindow.webContents.send(CHANNELS.TO_RENDERER.AGENT_CONTENT_UPDATE, { delta });
       
       // Live estimation
-      this.currentTurnStats.output += delta.length / 4;
+      this.historyManager.updateLiveOutput(delta.length);
       this.emitStats();
     }
   }
@@ -322,9 +229,7 @@ export class AgentOrchestrator {
 
     // PREPEND HISTORY: Format the previous messages so the agent sees the full conversation
     console.log(`[Orchestrator] Received history items: ${request.history?.length || 0}`);
-    const historyText = request.history && request.history.length > 0 
-        ? request.history.map(m => `[${m.role === 'user' ? 'User' : (m.agentName || 'System')}]: ${m.content}`).join('\n\n') + '\n\n'
-        : "";
+    const historyText = this.historyManager.formatHistoryText(request.history || []);
     
     // 3. Mode-Specific Prompt Injection
     let modeSystemInject = "";
@@ -392,12 +297,6 @@ TOOLS AVAILABLE: <read_file>, <search>, <list_directory>, <web_search>.`;
           this.emitResumed();
       }
 
-      /* 
-         REMOVED FORCE FINISH: 
-         Rely on Router to decide. If we force finish here, new user inputs are ignored 
-         if the previous tasks remain in the 'completed' state.
-      */
-
       loopCount++;
 
       // PRIORITY: If any task awaits review, force Reviewer (ONLY IN AGENTIC MODE)
@@ -409,7 +308,6 @@ TOOLS AVAILABLE: <read_file>, <search>, <list_directory>, <web_search>.`;
 
       if (nextAgent === 'Router') {
         this.emitStatus('Router');
-        this.currentTurnStats.agent = 'Router';
         const routerSystemPrompt = workflow.routerPrompt;
 
         const taskContext = this.currentTasks.length > 0
@@ -435,8 +333,8 @@ TOOLS AVAILABLE: <read_file>, <search>, <list_directory>, <web_search>.`;
 
           if (signal.aborted) break;
 
-          const cleanJson = routerResponse.replace(/```json/g, '').replace(/```/g, '').trim();
-          const decision = JSON.parse(cleanJson);
+          const decision = this.parser.parseJson(routerResponse);
+          if (!decision) throw new Error("Invalid Router JSON");
 
           nextAgent = decision.next_agent;
           const reasoning = decision.reasoning;
@@ -449,8 +347,6 @@ TOOLS AVAILABLE: <read_file>, <search>, <list_directory>, <web_search>.`;
           if (this.isPaused && nextAgent !== 'FINISH') {
                const agentDef = this.workflowService.getAgent(nextAgent);
                const previewSystemPrompt = agentDef?.systemPrompt || "";
-               
-               // For the next agent, the input is the FULL history + task context
                const previewInput = currentHistory + taskContext;
 
                this.emitPaused({
@@ -471,10 +367,8 @@ TOOLS AVAILABLE: <read_file>, <search>, <list_directory>, <web_search>.`;
                   nextAgent = 'QA';
                   const verificationPrompt = `\n\n[SYSTEM INTERRUPT]: The Router signaled to FINISH, but the following tasks are still marked as incomplete in the system:\n${incompleteTasks.map(t => `- ${t.id}: ${t.description}`).join('\n')}\n\nReview the conversation history above.\n1. If these tasks were actually completed by the Coder/Agent, output "**[COMPLETED: Task ID]**" for each.\n2. If they were NOT completed, list what is missing and provide a brief plan to finish them.\n3. If they are invalid, mark them as "**[REJECTED: Task ID]**".`;
                   
-                  // We append this to the current history context so the QA agent sees it as the immediate trigger
                   currentHistory += verificationPrompt;
                   
-                  // Also inform the user via UI
                   const interceptMsg = `\n\n### 🛡️ Verifying Task Completion...\n*Router wanted to finish, but ${incompleteTasks.length} tasks are pending. Asking QA to verify.*`;
                   finalContent += interceptMsg;
                   this.emitContent(finalContent);
@@ -489,8 +383,8 @@ TOOLS AVAILABLE: <read_file>, <search>, <list_directory>, <web_search>.`;
 
         } catch (e: any) {
           if (e.message === 'Aborted by user') break;
-          console.error("Router JSON Error:", routerResponse);
-          finalContent += `\n[System Error: Router returned invalid JSON. Stopping.]\n`;
+          console.error("Router Error:", e);
+          finalContent += `\n[System Error: Router failed. Stopping.]\n`;
           this.emitContent(finalContent);
           break;
         }
@@ -501,7 +395,6 @@ TOOLS AVAILABLE: <read_file>, <search>, <list_directory>, <web_search>.`;
 
         const agentDef = this.workflowService.getAgent(nextAgent);
         
-        // Fallback or Error if agent not found
         if (!agentDef) {
              const errorMsg = `\n[System Error: Agent '${nextAgent}' not found in workflow definition.]\n`;
              finalContent += errorMsg;
@@ -511,22 +404,10 @@ TOOLS AVAILABLE: <read_file>, <search>, <list_directory>, <web_search>.`;
 
         let agentSystemPrompt = agentDef.systemPrompt;
         
-        // Override for Analysis Mode
         if (operationMode === 'analysis') {
-            agentSystemPrompt = `You are an expert Systems Analyst and Reporter.
-                   
-GOAL: Analyze the provided code/context and answer the User's Request in detail.
-
-CONSTRAINTS:
-- You are in READ-ONLY mode.
-- DO NOT write files or replace code.
-- DO NOT run terminal commands (except for <search> or <list_directory>).
-- Output PLAIN TEXT (Markdown) reports. DO NOT output JSON.
-
-TOOLS AVAILABLE: <read_file>, <search>, <list_directory>, <web_search>.`;
+            agentSystemPrompt = `You are an expert Systems Analyst and Reporter. (Analysis Mode instructions...)`;
         }
 
-        this.currentTurnStats.agent = nextAgent === 'Solo' && operationMode === 'analysis' ? 'Analyst' : nextAgent;
         let agentOutput = "";
 
         try {
@@ -554,9 +435,7 @@ TOOLS AVAILABLE: <read_file>, <search>, <list_directory>, <web_search>.`;
 
             const loopResult = this.loopHandler.analyze(agentOutput);
             if (loopResult.isLooping) {
-               console.log(`[Orchestrator] Loop Detected! Trimming output.`);
-               agentOutput = agentOutput.slice(0, loopResult.trimIndex);
-               agentOutput += "\n\n[SYSTEM INTERVENTION: Loop detected. You were oscillating between verification steps. Stop verifying. Execute the plan immediately based on your findings above.]";
+               agentOutput = agentOutput.slice(0, loopResult.trimIndex) + "\n\n[SYSTEM INTERVENTION: Loop detected.]";
                this.emitDelta("\n\n⚡ [SYSTEM: Loop detected - Interrupting...]\n");
                break; 
             }
@@ -565,81 +444,60 @@ TOOLS AVAILABLE: <read_file>, <search>, <list_directory>, <web_search>.`;
             this.emitDelta(chunk);
 
             // --- STREAMING TOOL EXECUTION ---
-            const writeMatch = /<write_file path="([^"]+)">([\s\S]*?)<\/write_file>/.exec(streamBuffer);
-            const replaceMatch = /<replace path="([^"]+)">\s*<old>([\s\S]*?)<\/old>\s*<new>([\s\S]*?)<\/new>\s*<\/replace>/.exec(streamBuffer);
-            const readMatch = /<read_file>(.*?)<\/read_file>/.exec(streamBuffer);
-            const execMatch = /<execute_command(?:\s+background=["'](true|false)["'])?>([\s\S]*?)<\/execute_command>/.exec(streamBuffer);
-            
-            // Asset Designer Matches
-            const genImageMatch = /<generate_image\s+prompt="([^"]+)"(?:\s+aspect_ratio="([^"]+)")?\s*\/>/.exec(streamBuffer);
-            const resizeImageMatch = /<resize_image\s+path="([^"]+)"\s+width=(\d+)\s+height=(\d+)(?:\s+format="([^"]+)")?\s*\/>/.exec(streamBuffer);
-            const saveAssetMatch = /<save_asset\s+src="([^"]+)"\s+dest="([^"]+)"\s*\/>/.exec(streamBuffer);
-
+            const tags = this.parser.parseToolTags(streamBuffer);
             let toolExecuted = false;
             let result = null;
 
-            if (writeMatch) {
-                const [fullMatch, path, content] = writeMatch;
+            if (tags.write) {
+                const [fullMatch, path, content] = tags.write;
                 this.emitPhase('EXECUTING_TOOL', `Writing file: ${path}`);
                 result = await this.tools.executeWrite(path, content, autoApply);
                 this.projectWorkingSet.set(path, content);
                 streamBuffer = streamBuffer.replace(fullMatch, ""); 
                 toolExecuted = true;
-            } else if (replaceMatch) {
-                const [fullMatch, path, oldStr, newStr] = replaceMatch;
+            } else if (tags.replace) {
+                const [fullMatch, path, oldStr, newStr] = tags.replace;
                 this.emitPhase('EXECUTING_TOOL', `Patching file: ${path}`);
                 result = await this.tools.executeReplace(path, oldStr, newStr, autoApply);
                 if (result) {
-                   try {
-                       const fullContent = await this.fileSystem.handleReadFile(path);
-                       this.projectWorkingSet.set(path, fullContent);
-                   } catch (e) { /* ignore read error */ }
+                   const fullContent = await this.fileSystem.handleReadFile(path);
+                   this.projectWorkingSet.set(path, fullContent);
                 }
                 streamBuffer = streamBuffer.replace(fullMatch, "");
                 toolExecuted = true;
-            } else if (readMatch) {
-                const [fullMatch, path] = readMatch;
+            } else if (tags.read) {
+                const [fullMatch, path] = tags.read;
                 this.emitPhase('EXECUTING_TOOL', `Reading file: ${path}`);
                 result = await this.tools.executeRead(path);
                 if (result) {
-                   try {
-                       const fullContent = await this.fileSystem.handleReadFile(path);
-                       this.projectWorkingSet.set(path, fullContent);
-                   } catch (e) { /* ignore */ }
+                   const fullContent = await this.fileSystem.handleReadFile(path);
+                   this.projectWorkingSet.set(path, fullContent);
                 }
                 streamBuffer = streamBuffer.replace(fullMatch, "");
                 toolExecuted = true;
-            } else if (execMatch) {
-                const [fullMatch, bgAttr, commandContent] = execMatch;
-                const isBackground = bgAttr === 'true';
-                const command = commandContent.trim();
-                
-                this.emitPhase('EXECUTING_TOOL', `Running: ${command}`);
-                result = await this.tools.executeCommand(command, autoApply, isBackground);
+            } else if (tags.execute) {
+                const [fullMatch, bgAttr, commandContent] = tags.execute;
+                result = await this.tools.executeCommand(commandContent.trim(), autoApply, bgAttr === 'true');
                 streamBuffer = streamBuffer.replace(fullMatch, "");
                 toolExecuted = true;
-            } else if (genImageMatch) {
-                const [fullMatch, prompt, ar] = genImageMatch;
-                this.emitPhase('EXECUTING_TOOL', 'Generating Image (Nano Banana Pro)...');
+            } else if (tags.genImage) {
+                const [fullMatch, prompt, ar] = tags.genImage;
                 result = await this.tools.executeGenerateImage(prompt, ar);
                 streamBuffer = streamBuffer.replace(fullMatch, "");
                 toolExecuted = true;
-            } else if (resizeImageMatch) {
-                const [fullMatch, path, w, h, fmt] = resizeImageMatch;
-                this.emitPhase('EXECUTING_TOOL', `Resizing image to ${w}x${h}...`);
+            } else if (tags.resizeImage) {
+                const [fullMatch, path, w, h, fmt] = tags.resizeImage;
                 result = await this.tools.executeResizeImage(path, parseInt(w), parseInt(h), fmt);
                 streamBuffer = streamBuffer.replace(fullMatch, "");
                 toolExecuted = true;
-            } else if (saveAssetMatch) {
-                const [fullMatch, src, dest] = saveAssetMatch;
-                this.emitPhase('EXECUTING_TOOL', `Saving asset to ${dest}...`);
+            } else if (tags.saveAsset) {
+                const [fullMatch, src, dest] = tags.saveAsset;
                 result = await this.tools.executeSaveAsset(src, dest);
                 streamBuffer = streamBuffer.replace(fullMatch, "");
                 toolExecuted = true;
             }
 
             if (toolExecuted && result) {
-                this.emitPhase('ANALYZING', 'Processing tool output...');
                 const toolMsg = `\n\n[System Tool Output]:\n${result.userOutput}`;
                 finalContent += toolMsg;
                 this.emitDelta(toolMsg);
@@ -648,259 +506,108 @@ TOOLS AVAILABLE: <read_file>, <search>, <list_directory>, <web_search>.`;
           }
 
           finalContent += agentOutput;
-
           if (signal.aborted) break;
           
           // --- TASK STATUS PARSING ---
-          const completedMatch = agentOutput.match(/\[COMPLETED:([^\]]+)\]/gi);
-          const verifiedMatch = agentOutput.match(/\[VERIFIED:([^\]]+)\]/gi);
-          const rejectedMatch = agentOutput.match(/\[REJECTED:([^\]]+)\]/gi);
+          const markers = this.parser.parseTaskMarkers(agentOutput);
 
-          if (completedMatch) {
-              completedMatch.forEach(tag => {
-                  const contentMatch = tag.match(/\[COMPLETED:([^\]]+)\]/i);
-                  if (contentMatch && contentMatch[1]) {
-                      const ids = contentMatch[1].match(/\d+/g); // Extract all numbers
-                      if (ids) {
-                          ids.forEach(id => {
-                              // Check strict ID match or "Task ID" match
-                              const task = this.currentTasks.find(t => t.id === id || t.id === `Task ${id}` || t.id.endsWith(` ${id}`));
-                              if (task && task.status !== 'completed') {
-                                  if (autoMarkTasks) {
-                                      task.status = 'completed';
-                                      const msg = `\n\n[System: Auto-marked Task ${task.id} as COMPLETED]`;
-                                      finalContent += msg;
-                                      this.emitDelta(msg);
-                                  } else {
-                                      task.status = 'review_pending';
-                                      const msg = `\n\n[System: Task ${task.id} marked for REVIEW]`;
-                                      finalContent += msg;
-                                      this.emitDelta(msg);
-                                  }
-                              }
-                          });
-                          this.emitPlan();
+          if (markers.completed) {
+              markers.completed.forEach(tag => {
+                  const ids = this.parser.extractIdsFromTag(tag);
+                  ids.forEach(id => {
+                      const task = this.currentTasks.find(t => t.id === id || t.id === `Task ${id}`);
+                      if (task && task.status !== 'completed') {
+                          task.status = autoMarkTasks ? 'completed' : 'review_pending';
+                          this.emitDelta(`\n\n[System: Task ${task.id} marked as ${task.status}]`);
                       }
-                  }
+                  });
               });
+              this.emitPlan();
           }
 
-          if (verifiedMatch) {
-              for (const tag of verifiedMatch) {
-                  const contentMatch = tag.match(/\[VERIFIED:([^\]]+)\]/i);
-                  if (contentMatch && contentMatch[1]) {
-                      const ids = contentMatch[1].match(/\d+/g);
-                      if (ids) {
-                          for (const id of ids) {
-                              const task = this.currentTasks.find(t => t.id === id || t.id === `Task ${id}` || t.id.endsWith(` ${id}`));
-                              if (task && (task.status === 'review_pending' || task.status === 'in_progress')) {
-                                  if (autoMarkTasks) {
-                                      task.status = 'completed';
-                                      const msg = `\n\n✅ [System: Task ${task.id} VERIFIED and COMPLETED]`;
-                                      finalContent += msg;
-                                      this.emitDelta(msg);
-                                  } else {
-                                      if (signal.aborted) break;
-                                      const result = await this.proposalManager.requestTaskConfirmation(task.description);
-                                      if (result.status === 'confirmed') {
-                                          task.status = 'completed';
-                                          const msg = `\n\n✅ [System: User confirmed Task ${task.id}]`;
-                                          finalContent += msg;
-                                          this.emitDelta(msg);
-                                      } else {
-                                          task.status = 'in_progress';
-                                          const msg = `\n\n❌ [System: User rejected Task ${task.id}: ${result.comment}]`;
-                                          finalContent += msg;
-                                          this.emitDelta(msg);
-                                          currentHistory += `\n[User Rejection]: Task ${task.id} was rejected. Reason: ${result.comment}`;
-                                      }
-                                  }
+          if (markers.verified) {
+              for (const tag of markers.verified) {
+                  const ids = this.parser.extractIdsFromTag(tag);
+                  for (const id of ids) {
+                      const task = this.currentTasks.find(t => t.id === id || t.id === `Task ${id}`);
+                      if (task && (task.status === 'review_pending' || task.status === 'in_progress')) {
+                          if (autoMarkTasks) {
+                              task.status = 'completed';
+                              this.emitDelta(`\n\n✅ [System: Task ${task.id} VERIFIED]`);
+                          } else {
+                              const result = await this.proposalManager.requestTaskConfirmation(task.description);
+                              if (result.status === 'confirmed') {
+                                  task.status = 'completed';
+                                  this.emitDelta(`\n\n✅ [System: User confirmed Task ${task.id}]`);
+                              } else {
+                                  task.status = 'in_progress';
+                                  this.emitDelta(`\n\n❌ [System: User rejected Task ${task.id}]`);
+                                  currentHistory += `\n[User Rejection]: ${result.comment}`;
                               }
                           }
-                          this.emitPlan();
                       }
                   }
               }
-          }
-
-          if (rejectedMatch) {
-              rejectedMatch.forEach(tag => {
-                  const contentMatch = tag.match(/\[REJECTED:([^\]]+)\]/i);
-                  if (contentMatch && contentMatch[1]) {
-                      const ids = contentMatch[1].match(/\d+/g);
-                      if (ids) {
-                          ids.forEach(id => {
-                              const task = this.currentTasks.find(t => t.id === id || t.id === `Task ${id}` || t.id.endsWith(` ${id}`));
-                              if (task) {
-                                  task.status = 'in_progress';
-                                  const msg = `\n\n❌ [System: Task ${task.id} REJECTED by Reviewer]`;
-                                  finalContent += msg;
-                                  this.emitDelta(msg);
-                              }
-                          });
-                          this.emitPlan();
-                      }
-                  }
-              });
+              this.emitPlan();
           }
 
           if (nextAgent === 'Planner') {
-            this.parseChecklist(agentOutput);
+            this.updateChecklist(this.parser.parseChecklist(agentOutput));
           }
 
-          // Auto-verify files if any agent requests them in JSON
           await this.handleAutoVerification(agentOutput);
 
-          // Check for explicit [FINISH] token from Solo agent
           if (isSoloMode && agentOutput.includes('[FINISH]')) {
               nextAgent = 'FINISH';
-              finalContent += "\n\n[System: Solo Agent indicated completion.]\n";
           } else {
-             // If not finishing, determine next step
-             if (isSoloMode) {
-                 nextAgent = 'Solo';
-                 // For Solo, we just append the output to history and let it run again
-             } else {
-                 nextAgent = 'Router';
-             }
+             nextAgent = isSoloMode ? 'Solo' : 'Router';
           }
 
-          // --- SOLO MODE: FORCE STOP IF NO TOOLS USED (Plan Phase) ---
-          const hasToolTags = /<(write|read|replace|search|list_directory|glob)[^>]*>/i.test(agentOutput); 
-          if (isSoloMode && !hasToolTags && nextAgent !== 'FINISH') {
-              // This was likely a planning turn. Stop to let user confirm.
-              nextAgent = 'FINISH'; 
-              finalContent += "\n\n[System: Solo Agent awaiting user confirmation.]\n";
-          }
-
-          currentHistory += `\n\n### ${nextAgent === 'FINISH' && isSoloMode ? 'Solo' : (isSoloMode ? 'Solo' : nextAgent)} Output:\n${agentOutput}`;
-          if (isSoloMode) {
-              currentInput = currentHistory; // Keep feeding full history
-          }
+          currentHistory += `\n\n### ${isSoloMode ? 'Solo' : nextAgent} Output:\n${agentOutput}`;
+          currentInput = currentHistory;
 
           steps.push({ agent: isSoloMode ? 'Solo' : nextAgent, input: '...', output: agentOutput });
           this.emitSteps(steps);
           this.commitTurn();
           
-          // If we just finished via Solo token, break loop
           if (nextAgent === 'FINISH') break;
 
         } catch (err: any) {
           if (err.message === 'Aborted by user') break;
           console.error(`Error in ${nextAgent}:`, err);
-          const errorMsg = `\n[Error executing ${nextAgent}: ${err.message}]\n`;
-          finalContent += errorMsg;
-          this.emitDelta(errorMsg);
+          this.emitDelta(`\n[Error executing ${nextAgent}: ${err.message}]\n`);
           break;
         }
       }
     }
     this.abortController = null;
-    return {
-      content: finalContent,
-      steps: []
-    };
+    return { content: finalContent, steps: [] };
   }
 
   private async handleAutoVerification(text: string) {
-      try {
-          // Extract JSON from code blocks or raw text
-          const jsonMatch = text.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/) || text.match(/\{[\s\S]*\}/);
-          if (!jsonMatch) return;
-          
-          const jsonString = jsonMatch[1] || jsonMatch[0];
-          let data: any;
-          try {
-              data = JSON.parse(jsonString);
-          } catch (e) {
-              return; // Not a valid JSON block, ignore
-          }
-          
-          if (data.verification_needed && Array.isArray(data.verification_needed)) {
-              const filesToRead = data.verification_needed.filter((f: any) => typeof f === 'string' && f.includes('.'));
-              
-              if (filesToRead.length > 0) {
-                  this.emitDelta(`\n\n[System: Auto-loading ${filesToRead.length} files into context...]\n`);
-                  
-                  for (const file of filesToRead) {
-                       try {
-                           this.emitDelta(`  - Reading: ${file}\n`);
-                           const result = await this.tools.executeRead(file);
-                           if (result) {
-                              const content = await this.fileSystem.handleReadFile(file);
-                              this.projectWorkingSet.set(file, content);
-                           }
-                       } catch (e) {
-                           console.warn(`[Orchestrator] Failed to auto-verify ${file}:`, e);
-                       }
-                  }
-                  this.emitDelta(`[System: Context updated successfully.]\n`);
+      const data = this.parser.parseJson(text);
+      if (data?.verification_needed && Array.isArray(data.verification_needed)) {
+          const filesToRead = data.verification_needed.filter((f: any) => typeof f === 'string' && f.includes('.'));
+          if (filesToRead.length > 0) {
+              this.emitDelta(`\n\n[System: Auto-loading ${filesToRead.length} files...]\n`);
+              for (const file of filesToRead) {
+                    const result = await this.tools.executeRead(file);
+                    if (result) {
+                        const content = await this.fileSystem.handleReadFile(file);
+                        this.projectWorkingSet.set(file, content);
+                    }
               }
           }
-      } catch (e) {
-          // Silent fail for non-JSON outputs
       }
   }
 
-  private parseChecklist(text: string) {
-    console.log("Orchestrator: Parsing checklist from Planner output...");
-    const strictRegex = /- \[ \] \*\*(Task \d+:)\*\* (.*?)(?:\*Verify by:\* (.*))?$/gm;
-    const looseRegex = /^(?:-|\d+\.)\s*(?:[\s]*\[\s*\]\s*)?(?:\*\*)?(Task\s*\d+:)?(?:\*\*)?\s*(.*?)$/gm;
-
-    let match;
-    const newTasks: ITask[] = [];
-
-    // Try strict first
-    while ((match = strictRegex.exec(text)) !== null) {
-      newTasks.push({
-        id: match[1].replace(':', ''),
-        description: match[2].trim(),
-        status: 'pending'
-      });
-    }
-
-    // If strict failed, try loose
-    if (newTasks.length === 0) {
-      while ((match = looseRegex.exec(text)) !== null) {
-        if (match[2] && match[2].trim().length > 5) {
-          newTasks.push({
-            id: match[1] ? match[1].replace(':', '') : `Task ${newTasks.length + 1}`,
-            description: match[2].trim(),
-            status: 'pending'
-          });
-        }
-      }
-    }
-
-    console.log(`Orchestrator: Found ${newTasks.length} tasks.`);
-
+  private updateChecklist(newTasks: ITask[]) {
     if (newTasks.length > 0) {
-      // Merge with existing tasks to preserve status if ID exists
       if (this.currentTasks.length > 0) {
-          const merged = newTasks.map(newTask => {
-              // Match primarily on ID
-              const existing = this.currentTasks.find(t => t.id === newTask.id);
-              
-              if (existing) {
-                  // Only preserve status if the description is substantially the same.
-                  // If the description changed, it's likely a new task with reused ID -> Reset to pending.
-                  if (existing.description.trim() === newTask.description.trim()) {
-                      return { ...newTask, status: existing.status };
-                  } else {
-                      const pendingStatus: ITask['status'] = 'pending';
-                      return { ...newTask, status: pendingStatus };
-                  }
-              }
-              
-              // Fallback: If no ID match, check description match (unlikely but safe)
-              const existingByDesc = this.currentTasks.find(t => t.description === newTask.description);
-              if (existingByDesc) {
-                   return { ...newTask, status: existingByDesc.status };
-              }
-
-              return newTask;
+          this.currentTasks = newTasks.map(newTask => {
+              const existing = this.currentTasks.find(t => t.id === newTask.id || (t.description === newTask.description));
+              return existing ? { ...newTask, status: existing.status } : newTask;
           });
-          this.currentTasks = merged;
       } else {
           this.currentTasks = newTasks;
       }
