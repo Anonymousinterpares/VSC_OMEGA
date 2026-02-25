@@ -5,7 +5,7 @@
   "scripts": {
     "dev:vite": "vite",
     "dev:main": "tsc -p src/main/tsconfig.json -w",
-    "dev:electron": "wait-on tcp:5173 && wait-on dist/main/src/main/main.js && cross-env NODE_ENV=development electron .",
+    "dev:electron": "wait-on tcp:%VITE_PORT% && wait-on dist/main/src/main/main.js && cross-env NODE_ENV=development electron .",
     "dev": "concurrently -k \"npm run dev:vite\" \"npm run dev:main\" \"npm run dev:electron\"",
     "build": "tsc -p src/main/tsconfig.json && vite build",
     "preview": "npm run build && electron ."
