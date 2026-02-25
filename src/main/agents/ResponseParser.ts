@@ -88,4 +88,14 @@ export class ResponseParser {
             return null;
         }
     }
+
+    /**
+     * Normalizes a task ID by removing prefixes like "Task", whitespace, and colons.
+     */
+    public normalizeId(id: string): string {
+        return id.toLowerCase()
+                 .replace(/^task\s*/, '')
+                 .replace(/:$/, '')
+                 .trim();
+    }
 }

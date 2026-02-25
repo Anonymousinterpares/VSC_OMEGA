@@ -59,6 +59,7 @@ export interface ITask {
     status: 'pending' | 'in_progress' | 'review_pending' | 'completed' | 'rejected' | 'failed';
     assignedAgent?: string;
     verificationCmd?: string;
+    lastModifiedFiles?: string[];
 }
 
 export interface IAppSettings {

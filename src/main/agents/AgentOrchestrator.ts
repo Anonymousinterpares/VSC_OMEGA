@@ -447,12 +447,14 @@ TOOLS AVAILABLE: <read_file>, <search>, <list_directory>, <web_search>.`;
             const tags = this.parser.parseToolTags(streamBuffer);
             let toolExecuted = false;
             let result = null;
+            let targetPath = "";
 
             if (tags.write) {
                 const [fullMatch, path, content] = tags.write;
                 this.emitPhase('EXECUTING_TOOL', `Writing file: ${path}`);
                 result = await this.tools.executeWrite(path, content, autoApply);
                 this.projectWorkingSet.set(path, content);
+                targetPath = path;
                 streamBuffer = streamBuffer.replace(fullMatch, ""); 
                 toolExecuted = true;
             } else if (tags.patch) {
@@ -463,6 +465,7 @@ TOOLS AVAILABLE: <read_file>, <search>, <list_directory>, <web_search>.`;
                    const fullContent = await this.fileSystem.handleReadFile(path);
                    this.projectWorkingSet.set(path, fullContent);
                 }
+                targetPath = path;
                 streamBuffer = streamBuffer.replace(fullMatch, "");
                 toolExecuted = true;
             } else if (tags.replace) {
@@ -473,6 +476,7 @@ TOOLS AVAILABLE: <read_file>, <search>, <list_directory>, <web_search>.`;
                    const fullContent = await this.fileSystem.handleReadFile(path);
                    this.projectWorkingSet.set(path, fullContent);
                 }
+                targetPath = path;
                 streamBuffer = streamBuffer.replace(fullMatch, "");
                 toolExecuted = true;
             } else if (tags.read) {
@@ -508,6 +512,17 @@ TOOLS AVAILABLE: <read_file>, <search>, <list_directory>, <web_search>.`;
             }
 
             if (toolExecuted && result) {
+                // Associate with current task if one is in_progress
+                if (targetPath) {
+                    const activeTask = this.currentTasks.find(t => t.status === 'in_progress');
+                    if (activeTask) {
+                        activeTask.lastModifiedFiles = activeTask.lastModifiedFiles || [];
+                        if (!activeTask.lastModifiedFiles.includes(targetPath)) {
+                            activeTask.lastModifiedFiles.push(targetPath);
+                        }
+                    }
+                }
+
                 const toolMsg = `\n\n[System Tool Output]:\n${result.userOutput}`;
                 finalContent += toolMsg;
                 this.emitDelta(toolMsg);
@@ -518,46 +533,49 @@ TOOLS AVAILABLE: <read_file>, <search>, <list_directory>, <web_search>.`;
           finalContent += agentOutput;
           if (signal.aborted) break;
           
-          // --- TASK STATUS PARSING ---
+          // --- TASK STATUS PARSING (LEGACY + JSON UPDATES) ---
           const markers = this.parser.parseTaskMarkers(agentOutput);
+          const structuredData = this.parser.parseJson(agentOutput);
+          const taskUpdates: { id: string, status: ITask['status'] }[] = [];
 
-          if (markers.completed) {
-              markers.completed.forEach(tag => {
-                  const ids = this.parser.extractIdsFromTag(tag);
-                  ids.forEach(id => {
-                      const task = this.currentTasks.find(t => t.id === id || t.id === `Task ${id}`);
-                      if (task && task.status !== 'completed') {
-                          task.status = autoMarkTasks ? 'completed' : 'review_pending';
-                          this.emitDelta(`\n\n[System: Task ${task.id} marked as ${task.status}]`);
-                      }
-                  });
+          // 1. Prioritize Structured JSON Updates
+          if (structuredData?.updates && Array.isArray(structuredData.updates)) {
+              structuredData.updates.forEach((u: any) => {
+                  if (u.id && u.status) taskUpdates.push({ id: u.id, status: u.status });
               });
-              this.emitPlan();
           }
 
+          // 2. Fallback to Legacy Text Markers
+          if (markers.completed) {
+              markers.completed.forEach(tag => {
+                  this.parser.extractIdsFromTag(tag).forEach(id => taskUpdates.push({ id, status: 'completed' }));
+              });
+          }
           if (markers.verified) {
-              for (const tag of markers.verified) {
-                  const ids = this.parser.extractIdsFromTag(tag);
-                  for (const id of ids) {
-                      const task = this.currentTasks.find(t => t.id === id || t.id === `Task ${id}`);
-                      if (task && (task.status === 'review_pending' || task.status === 'in_progress')) {
-                          if (autoMarkTasks) {
-                              task.status = 'completed';
-                              this.emitDelta(`\n\n✅ [System: Task ${task.id} VERIFIED]`);
-                          } else {
-                              const result = await this.proposalManager.requestTaskConfirmation(task.description);
-                              if (result.status === 'confirmed') {
-                                  task.status = 'completed';
-                                  this.emitDelta(`\n\n✅ [System: User confirmed Task ${task.id}]`);
-                              } else {
-                                  task.status = 'in_progress';
-                                  this.emitDelta(`\n\n❌ [System: User rejected Task ${task.id}]`);
-                                  currentHistory += `\n[User Rejection]: ${result.comment}`;
-                              }
-                          }
+              markers.verified.forEach(tag => {
+                  this.parser.extractIdsFromTag(tag).forEach(id => taskUpdates.push({ id, status: 'completed' }));
+              });
+          }
+
+          // 3. Apply Updates with Normalized ID Matching
+          if (taskUpdates.length > 0) {
+              taskUpdates.forEach(update => {
+                  const normalizedTargetId = this.parser.normalizeId(update.id);
+                  const task = this.currentTasks.find(t => this.parser.normalizeId(t.id) === normalizedTargetId);
+                  
+                  if (task && task.status !== update.status) {
+                      // Status logic
+                      if (update.status === 'completed' && !autoMarkTasks) {
+                          task.status = 'review_pending';
+                      } else {
+                          task.status = update.status;
                       }
+
+                      const msg = `\n\n[System: Task ${task.id} set to ${task.status.toUpperCase()}]`;
+                      finalContent += msg;
+                      this.emitDelta(msg);
                   }
-              }
+              });
               this.emitPlan();
           }
 
